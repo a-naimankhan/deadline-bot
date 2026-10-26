@@ -4,6 +4,7 @@ import (
 	"context"
 	"deadline-bot/internal/config"
 	"deadline-bot/internal/logger"
+	"deadline-bot/internal/repository/postgres"
 	"fmt"
 	"os"
 	"os/signal"
@@ -67,7 +68,15 @@ func run() error {
 	log := logger.Get()
 	log.Info("starting bot", "tz", cfg.Location.String(), "workers", cfg.Workers)
 
+	pool, err := postgres.NewPool(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("init pool: %w", err)
+	}
+	defer pool.Close()
+
 	//TODO init repo
+	repo := postgres.New(pool)
+	_ = repo //временно
 
 	//TODO init srv
 
