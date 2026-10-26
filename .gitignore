@@ -4,3 +4,13 @@
 # local
 /bin
 .idea
+
+# logs
+*.log
+
+# macOS
+.DS_Store
+
+# go workspace
+go.work
+go.work.sum

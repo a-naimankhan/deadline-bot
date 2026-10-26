@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -18,11 +21,40 @@ func main() {
 	}
 }
 
+func loadDotEnv() error {
+	dir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+
+	for {
+		envPath := filepath.Join(dir, ".env")
+		if _, err := os.Stat(envPath); err == nil {
+			if err := godotenv.Load(envPath); err != nil {
+				return fmt.Errorf("parse %s: %w", envPath, err)
+			}
+			return nil
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+
+	return nil
+}
+
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
 	defer stop()
-	//TODO get crediantials
+
+	if err := loadDotEnv(); err != nil {
+		return fmt.Errorf("load .env: %w", err)
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
