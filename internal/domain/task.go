@@ -1,12 +1,9 @@
 package domain
 
-import (
-	"time"
-	"uuid"
-)
+import "time"
 
 type Task struct {
-	ID        uuid.UUID
+	ID        int64
 	Subject   string
 	Title     string
 	Details   string
@@ -15,4 +12,6 @@ type Task struct {
 	CreatedAt time.Time
 }
 
-func (t *Task) IsDone() bool
+func (t Task) IsDone() bool {
+	return t.DoneAt != nil
+}

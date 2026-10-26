@@ -16,10 +16,9 @@ type Reminder struct {
 	ID       int64
 	TaskID   int64
 	Kind     ReminderKind
-	RemindAt time.Time // UTC
+	RemindAt time.Time
 }
 
-// DueReminder возвращается планировщику вместе с задачей, чтобы собрать текст
 type DueReminder struct {
 	Reminder
 	Task Task
