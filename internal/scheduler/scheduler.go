@@ -3,6 +3,8 @@ package scheduler
 import (
 	"context"
 	"time"
+
+	"deadline-bot/internal/domain"
 )
 
 type Store interface {
@@ -31,5 +33,6 @@ func NewScheduler(store Store, notifier Notifier, workers int, tick time.Duratio
 }
 
 func (s *Scheduler) Run(ctx context.Context) error {
-
+	//TODO implement scheduler
+	return nil
 }

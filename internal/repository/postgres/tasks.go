@@ -35,7 +35,7 @@ func normalizeTask(t *domain.Task) {
 
 // CreateTask создаёт задачу и все её напоминания в одной транзакции.
 func (r *Repo) CreateTask(ctx context.Context, t domain.Task, rem []domain.Reminder) (domain.Task, error) {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return domain.Task{}, fmt.Errorf("begin tx: %w", err)
 	}
@@ -70,7 +70,7 @@ func (r *Repo) CreateTask(ctx context.Context, t domain.Task, rem []domain.Remin
 
 // ListActive возвращает несданные задачи, ближайший дедлайн первым.
 func (r *Repo) ListActive(ctx context.Context) ([]domain.Task, error) {
-	rows, err := r.pool.Query(ctx,
+	rows, err := r.db.Query(ctx,
 		`SELECT `+taskColumns+` FROM tasks WHERE done_at IS NULL ORDER BY deadline ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list active tasks: %w", err)
@@ -86,7 +86,7 @@ func (r *Repo) ListActive(ctx context.Context) ([]domain.Task, error) {
 
 // GetTask возвращает задачу или domain.ErrNotFound.
 func (r *Repo) GetTask(ctx context.Context, id int64) (domain.Task, error) {
-	t, err := scanTask(r.pool.QueryRow(ctx,
+	t, err := scanTask(r.db.QueryRow(ctx,
 		`SELECT `+taskColumns+` FROM tasks WHERE id = $1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Task{}, fmt.Errorf("task %d: %w", id, domain.ErrNotFound)
@@ -99,7 +99,7 @@ func (r *Repo) GetTask(ctx context.Context, id int64) (domain.Task, error) {
 
 // MarkDone ставит done_at. Если задачи нет  или она уже сдана, возвращает domain.ErrNotFound.
 func (r *Repo) MarkDone(ctx context.Context, id int64, at time.Time) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := r.db.Exec(ctx,
 		`UPDATE tasks SET done_at = $2 WHERE id = $1 AND done_at IS NULL`, id, at.UTC())
 	if err != nil {
 		return fmt.Errorf("mark task %d done: %w", id, err)

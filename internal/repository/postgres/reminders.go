@@ -20,7 +20,7 @@ const pgForeignKeyViolation = "23503"
 
 // AddReminder добавляет напоминание (snooze, nag). Если задачи нет, возвращает domain.ErrNotFound.
 func (r *Repo) AddReminder(ctx context.Context, rem domain.Reminder) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.db.Exec(ctx,
 		`INSERT INTO reminders (task_id, kind, remind_at) VALUES ($1, $2, $3)`,
 		rem.TaskID, string(rem.Kind), rem.RemindAt.UTC(),
 	)
@@ -61,7 +61,7 @@ ORDER BY c.remind_at`
 
 // ClaimDue атомарно «арендует» до limit готовых к отправке напоминаний несданных задач.
 func (r *Repo) ClaimDue(ctx context.Context, now time.Time, limit int) ([]domain.DueReminder, error) {
-	rows, err := r.pool.Query(ctx, claimDueSQL, now.UTC(), limit, now.Add(-claimLease).UTC())
+	rows, err := r.db.Query(ctx, claimDueSQL, now.UTC(), limit, now.Add(-claimLease).UTC())
 	if err != nil {
 		return nil, fmt.Errorf("claim due reminders: %w", err)
 	}
@@ -91,7 +91,7 @@ func scanDue(row pgx.CollectableRow) (domain.DueReminder, error) {
 
 // MarkSent помечает напоминание отправленным. Если его нет или оно уже отправлено, возвращает domain.ErrNotFound.
 func (r *Repo) MarkSent(ctx context.Context, id int64, at time.Time) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := r.db.Exec(ctx,
 		`UPDATE reminders SET sent_at = $2 WHERE id = $1 AND sent_at IS NULL`, id, at.UTC())
 	if err != nil {
 		return fmt.Errorf("mark reminder %d sent: %w", id, err)

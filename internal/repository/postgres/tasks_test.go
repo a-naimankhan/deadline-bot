@@ -2,11 +2,12 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pashagolub/pgxmock/v2"
+	"github.com/pashagolub/pgxmock/v5"
 
 	"deadline-bot/internal/domain"
 )
@@ -173,7 +174,7 @@ func TestListActive(t *testing.T) {
 			AddRow(int64(1), "TEST", "Task1", "Details1", now.Add(24*time.Hour), nil, now).
 			AddRow(int64(2), "TEST", "Task2", "Details2", now.Add(48*time.Hour), nil, now)
 
-		mock.ExpectQuery(`SELECT `+taskColumns+` FROM tasks WHERE done_at IS NULL`).
+		mock.ExpectQuery(`SELECT ` + taskColumns + ` FROM tasks WHERE done_at IS NULL`).
 			WillReturnRows(rows)
 
 		tasks, err := repo.ListActive(ctx)
@@ -182,6 +183,12 @@ func TestListActive(t *testing.T) {
 		}
 		if len(tasks) != 2 {
 			t.Errorf("expected 2 tasks, got %d", len(tasks))
+		}
+		if tasks[0].Subject != "TEST" {
+			t.Errorf("expected Subject TEST, got %s", tasks[0].Subject)
+		}
+		if tasks[0].Title != "Task1" {
+			t.Errorf("expected Title Task1, got %s", tasks[0].Title)
 		}
 
 		if err := mock.ExpectationsWereMet(); err != nil {
@@ -197,12 +204,15 @@ func TestListActive(t *testing.T) {
 		defer mock.Close()
 
 		repo := New(mock)
-		mock.ExpectQuery(`SELECT `+taskColumns+` FROM tasks WHERE done_at IS NULL`).
-			WillReturnError(pgx.ErrTxClosed)
+		mock.ExpectQuery(`SELECT ` + taskColumns + ` FROM tasks WHERE done_at IS NULL`).
+			WillReturnError(errors.New("boom"))
 
 		_, err = repo.ListActive(ctx)
 		if err == nil {
 			t.Error("expected error")
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			t.Error("generic error should not be ErrNotFound")
 		}
 
 		if err := mock.ExpectationsWereMet(); err != nil {
@@ -220,7 +230,7 @@ func TestListActive(t *testing.T) {
 		repo := New(mock)
 		rows := pgxmock.NewRows([]string{"id", "subject", "title", "details", "deadline", "done_at", "created_at"})
 
-		mock.ExpectQuery(`SELECT `+taskColumns+` FROM tasks WHERE done_at IS NULL`).
+		mock.ExpectQuery(`SELECT ` + taskColumns + ` FROM tasks WHERE done_at IS NULL`).
 			WillReturnRows(rows)
 
 		tasks, err := repo.ListActive(ctx)
@@ -250,7 +260,7 @@ func TestGetTask(t *testing.T) {
 		repo := New(mock)
 		now := time.Now().UTC()
 
-		mock.ExpectQuery(`SELECT `+taskColumns+` FROM tasks WHERE id = \$1`).
+		mock.ExpectQuery(`SELECT ` + taskColumns + ` FROM tasks WHERE id = \$1`).
 			WithArgs(int64(1)).
 			WillReturnRows(pgxmock.NewRows([]string{"id", "subject", "title", "details", "deadline", "done_at", "created_at"}).
 				AddRow(int64(1), "TEST", "Task1", "Details1", now.Add(24*time.Hour), nil, now))
@@ -261,6 +271,12 @@ func TestGetTask(t *testing.T) {
 		}
 		if task.ID != 1 {
 			t.Errorf("expected ID 1, got %d", task.ID)
+		}
+		if task.Subject != "TEST" {
+			t.Errorf("expected Subject TEST, got %s", task.Subject)
+		}
+		if task.Title != "Task1" {
+			t.Errorf("expected Title Task1, got %s", task.Title)
 		}
 
 		if err := mock.ExpectationsWereMet(); err != nil {
@@ -276,13 +292,16 @@ func TestGetTask(t *testing.T) {
 		defer mock.Close()
 
 		repo := New(mock)
-		mock.ExpectQuery(`SELECT `+taskColumns+` FROM tasks WHERE id = \$1`).
+		mock.ExpectQuery(`SELECT ` + taskColumns + ` FROM tasks WHERE id = \$1`).
 			WithArgs(int64(999)).
 			WillReturnError(pgx.ErrNoRows)
 
 		_, err = repo.GetTask(ctx, 999)
 		if err == nil {
 			t.Error("expected error")
+		}
+		if !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("expected ErrNotFound, got %v", err)
 		}
 
 		if err := mock.ExpectationsWereMet(); err != nil {
@@ -298,12 +317,15 @@ func TestGetTask(t *testing.T) {
 		defer mock.Close()
 
 		repo := New(mock)
-		mock.ExpectQuery(`SELECT `+taskColumns+` FROM tasks WHERE id = \$1`).
-			WillReturnError(pgx.ErrTxClosed)
+		mock.ExpectQuery(`SELECT ` + taskColumns + ` FROM tasks WHERE id = \$1`).
+			WillReturnError(errors.New("boom"))
 
 		_, err = repo.GetTask(ctx, 1)
 		if err == nil {
 			t.Error("expected error")
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			t.Error("generic error should not be ErrNotFound")
 		}
 
 		if err := mock.ExpectationsWereMet(); err != nil {
@@ -357,6 +379,9 @@ func TestMarkDone(t *testing.T) {
 		if err == nil {
 			t.Error("expected error")
 		}
+		if !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("expected ErrNotFound, got %v", err)
+		}
 
 		if err := mock.ExpectationsWereMet(); err != nil {
 			t.Errorf("unmet expectations: %v", err)
@@ -374,11 +399,14 @@ func TestMarkDone(t *testing.T) {
 		now := time.Now().UTC()
 
 		mock.ExpectExec(`UPDATE tasks SET done_at = \$2 WHERE id = \$1 AND done_at IS NULL`).
-			WillReturnError(pgx.ErrTxClosed)
+			WillReturnError(errors.New("boom"))
 
 		err = repo.MarkDone(ctx, 1, now)
 		if err == nil {
 			t.Error("expected error")
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			t.Error("generic error should not be ErrNotFound")
 		}
 
 		if err := mock.ExpectationsWereMet(); err != nil {
