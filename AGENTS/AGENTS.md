@@ -175,8 +175,9 @@ func PlanReminders(deadline, now time.Time, loc *time.Location, hour int) []doma
 ```
 - `d2`: deadline's local date − 2 days at `hour:00`; `d1`: − 1 day; `dday`: deadline's date at `hour:00`.
 - If the `dday` time is not before the deadline (e.g. deadline 09:00), use `deadline − 1h`.
+- Nagging is planned here too: `nag` every 2h after `dday`, at most 6 — all before the deadline plus the first one at/after it (deadline 23:59 → 14,16,18,20,22,00). Done tasks are filtered by `ClaimDue`, so no cleanup is needed.
 - Drop everything with `RemindAt <= now`. Sorted ascending, UTC.
-- Table-driven tests: deadline in 5 days; in 1.5 days (`d2` dropped); tonight; today 09:00 with hour=12; already passed.
+- Table-driven tests: deadline in 5 days; in 1.5 days (`d2` dropped); tonight; today 09:00 with hour=12; already passed; month boundary.
 
 ### Step 7 — `internal/service/tasks.go`
 ```go
@@ -192,8 +193,9 @@ func (s *Service) AddTask(ctx, in AddTaskInput) (domain.Task, error) // ErrInval
 func (s *Service) ListActive(ctx) ([]domain.Task, error)
 func (s *Service) Done(ctx, taskID int64) error
 func (s *Service) Snooze(ctx, taskID int64, d time.Duration) error        // reminder kind=snooze at now+d
-func (s *Service) SnoozeUntilTomorrow(ctx, taskID int64) error            // next day at ReminderHour local
+func (s *Service) SnoozeUntilTomorrow(ctx, taskID int64) error            // nearest upcoming ReminderHour local: today if before it, else tomorrow
 ```
+Snoozing past the deadline is allowed on purpose: the planned `nag`s keep firing on the deadline day anyway.
 Tests with a fake repo and a fake clock.
 
 ### Step 8 — `internal/delivery/telegram/parse.go`
@@ -202,9 +204,11 @@ func ParseAdd(args string, now time.Time, loc *time.Location) (service.AddTaskIn
 ```
 Format `Subject | Title | date`. Dates: `DD.MM HH:MM`, `DD.MM.YYYY HH:MM`, `DD.MM` (time 23:59). No year → current year; a date in the past is an error. Tests: normal, extra spaces, missing separator, bad date, past date.
 
+Custom snooze: `/snooze <id> <duration>` (e.g. `/snooze 7 3h`, `1h30m`), duration via `time.ParseDuration`, must be > 0; calls `Service.Snooze`.
+
 ### Step 9 — Telegram delivery
 - `Bot.Run(ctx) error` blocks until ctx is cancelled. Any update/callback not from `OWNER_CHAT_ID` is ignored and logged at warn.
-- Commands: `/start`, `/add`, `/list`, `/done <id>`.
+- Commands: `/start`, `/add`, `/list`, `/done <id>`, `/snooze <id> <duration>`.
 - Inline callbacks: `done:<taskID>`, `snooze:<taskID>:3h`, `snooze:<taskID>:tomorrow`. Always answer the callback and edit the message so buttons disappear.
 - `Notifier.Send(ctx, domain.DueReminder) error` implements `scheduler.Notifier`; uses `rate.Limiter` (`limiter.Wait(ctx)` before each send). `d2`/`d1` calm text; `dday`/`nag` loud text.
 
@@ -215,8 +219,8 @@ Ticker goroutine → `ClaimDue(now, 50)` → unbuffered `jobs` channel → N wor
 - On send error do NOT call `MarkSent`; the lease expires and the reminder retries.
 - Test with fake `Store`/`Notifier`: two reminders go out; a send error never triggers `MarkSent`.
 
-### Step 11 — Nagging
-After a successful send of a `dday` or `nag` reminder for an undone task: schedule a `nag` in +3h until the deadline, then 1–2 more after it, then stop. Where this logic lives (service vs scheduler) is the owner's decision — OPEN.
+### Step 11 — Nagging (DECIDED, done in step 6)
+Lives in the service: `PlanReminders` pre-plans up to 6 `nag`s every 2h on the deadline day. No new columns, no repo changes, nothing for the scheduler to decide.
 
 ### Step 12 — Wiring in `main`
 cfg → logger → pool (`defer pool.Close()`) → repo → service → bot + notifier → scheduler → `errgroup` → graceful shutdown.
@@ -247,7 +251,7 @@ Multi-stage Dockerfile (Go image matching go.mod), GitHub Actions (`go vet`, `go
 
 ## 13. Known issues / cleanup list
 
-1. `migrations/00002_claim.sql`: SQL placed after the `+goose Down` section looks misplaced. Fix, and verify `make migrate-up` then `make migrate-down` both work. (Option: fold `claimed_at` into `00001` if nothing was ever applied elsewhere.)
+1. ~~`migrations/00002_claim.sql`: stray SQL in the Down section~~ — fixed (3d672e1).
 2. `env-example.env` should be named `.env.example`; keep it in sync with the required variables.
 3. Directory naming: `internal/transport-telegram/` (empty) vs planned `internal/delivery/telegram/`. Use `delivery/telegram`, remove the empty directory.
 4. `reminders_test.go` contains `t.Skip` stubs with a wrong reason. Replace with real tests (see §12).
