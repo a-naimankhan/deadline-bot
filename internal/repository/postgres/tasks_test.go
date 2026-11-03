@@ -68,11 +68,14 @@ func TestCreateTask(t *testing.T) {
 		defer mock.Close()
 
 		repo := New(mock)
-		mock.ExpectBegin().WillReturnError(pgx.ErrTxClosed)
+		mock.ExpectBegin().WillReturnError(errors.New("boom"))
 
 		_, err = repo.CreateTask(ctx, domain.Task{}, nil)
 		if err == nil {
 			t.Error("expected error")
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			t.Error("generic error should not be ErrNotFound")
 		}
 
 		if err := mock.ExpectationsWereMet(); err != nil {
@@ -88,14 +91,20 @@ func TestCreateTask(t *testing.T) {
 		defer mock.Close()
 
 		repo := New(mock)
+		task := domain.Task{Subject: "TEST", Title: "Test", Deadline: time.Now().UTC()}
+
 		mock.ExpectBegin()
 		mock.ExpectQuery(`INSERT INTO tasks`).
-			WillReturnError(pgx.ErrTxClosed)
+			WithArgs(task.Subject, task.Title, task.Details, task.Deadline).
+			WillReturnError(errors.New("boom"))
 		mock.ExpectRollback()
 
-		_, err = repo.CreateTask(ctx, domain.Task{}, nil)
+		_, err = repo.CreateTask(ctx, task, nil)
 		if err == nil {
 			t.Error("expected error")
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			t.Error("generic error should not be ErrNotFound")
 		}
 
 		if err := mock.ExpectationsWereMet(); err != nil {
@@ -116,14 +125,19 @@ func TestCreateTask(t *testing.T) {
 
 		mock.ExpectBegin()
 		mock.ExpectQuery(`INSERT INTO tasks`).
+			WithArgs(task.Subject, task.Title, task.Details, task.Deadline).
 			WillReturnRows(pgxmock.NewRows([]string{"id", "created_at"}).AddRow(int64(1), time.Now().UTC()))
 		mock.ExpectExec(`INSERT INTO reminders`).
-			WillReturnError(pgx.ErrTxClosed)
+			WithArgs(int64(1), string(reminders[0].Kind), reminders[0].RemindAt).
+			WillReturnError(errors.New("boom"))
 		mock.ExpectRollback()
 
 		_, err = repo.CreateTask(ctx, task, reminders)
 		if err == nil {
 			t.Error("expected error")
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			t.Error("generic error should not be ErrNotFound")
 		}
 
 		if err := mock.ExpectationsWereMet(); err != nil {
@@ -143,12 +157,16 @@ func TestCreateTask(t *testing.T) {
 
 		mock.ExpectBegin()
 		mock.ExpectQuery(`INSERT INTO tasks`).
+			WithArgs(task.Subject, task.Title, task.Details, task.Deadline).
 			WillReturnRows(pgxmock.NewRows([]string{"id", "created_at"}).AddRow(int64(1), time.Now().UTC()))
-		mock.ExpectCommit().WillReturnError(pgx.ErrTxClosed)
+		mock.ExpectCommit().WillReturnError(errors.New("boom"))
 
 		_, err = repo.CreateTask(ctx, task, nil)
 		if err == nil {
 			t.Error("expected error")
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			t.Error("generic error should not be ErrNotFound")
 		}
 
 		if err := mock.ExpectationsWereMet(); err != nil {
@@ -318,6 +336,7 @@ func TestGetTask(t *testing.T) {
 
 		repo := New(mock)
 		mock.ExpectQuery(`SELECT ` + taskColumns + ` FROM tasks WHERE id = \$1`).
+			WithArgs(int64(1)).
 			WillReturnError(errors.New("boom"))
 
 		_, err = repo.GetTask(ctx, 1)
@@ -399,6 +418,7 @@ func TestMarkDone(t *testing.T) {
 		now := time.Now().UTC()
 
 		mock.ExpectExec(`UPDATE tasks SET done_at = \$2 WHERE id = \$1 AND done_at IS NULL`).
+			WithArgs(int64(1), now).
 			WillReturnError(errors.New("boom"))
 
 		err = repo.MarkDone(ctx, 1, now)
