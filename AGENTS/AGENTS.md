@@ -54,7 +54,7 @@ Conventional style, one commit per step: `feat(config): ...`, `feat(repo): ...`,
 
 - Go toolchain **1.27.1** installed (go.mod says 1.26.8 — fine; Dockerfile must use a matching Go image).
 - PostgreSQL via **pgx v5** (`v5.11.0`), `pgxpool`.
-- Migrations: **goose** (`migrations/*.sql`).
+- Migrations: **goose** v3.29.0 (`migrations/*.sql`), embedded via `migrations.FS` and applied at startup by `postgres.Migrate` (advisory lock against concurrent runs).
 - Telegram: `github.com/go-telegram/bot` (planned).
 - Logging: stdlib `log/slog`, JSON, global (see decisions).
 - Env: `github.com/joho/godotenv` (only in `main`).
@@ -62,7 +62,7 @@ Conventional style, one commit per step: `feat(config): ...`, `feat(repo): ...`,
 - Owner develops on **Windows without CGO**. Some tooling runs in a Linux shell without C headers: keep `CGO_ENABLED=0` as default (see Makefile).
 
 ### Makefile targets
-`make fmt`, `make vet`, `make test`, `make test-race` (`CGO_ENABLED=1`, CI only), `make run`, `make migrate-up`, `make migrate-down`.
+`make fmt`, `make vet`, `make test`, `make test-race` (`CGO_ENABLED=1`, CI only), `make run`. Migrations run automatically when the bot starts.
 `CGO_ENABLED=0` must be the default for `vet`/`test` — pgx is pure Go, and a missing C toolchain must not break the build.
 
 ---
@@ -252,14 +252,14 @@ Multi-stage Dockerfile (Go image matching go.mod), GitHub Actions (`go vet`, `go
 ## 13. Known issues / cleanup list
 
 1. ~~`migrations/00002_claim.sql`: stray SQL in the Down section~~ — fixed (3d672e1).
-2. `env-example.env` should be named `.env.example`; keep it in sync with the required variables.
-3. Directory naming: `internal/transport-telegram/` (empty) vs planned `internal/delivery/telegram/`. Use `delivery/telegram`, remove the empty directory.
-4. `reminders_test.go` contains `t.Skip` stubs with a wrong reason. Replace with real tests (see §12).
-5. `tasks_test.go`: "not found" cases must assert `errors.Is(err, domain.ErrNotFound)`, not just `err != nil`; error cases should use a plain `errors.New("boom")`.
+2. ~~`env-example.env` → `.env.example`~~ — done.
+3. ~~empty `internal/transport-telegram/`~~ — removed.
+4. ~~`reminders_test.go` t.Skip stubs~~ — already real tests.
+5. ~~`tasks_test.go` error cases~~ — fixed (55ec694).
 6. Compatibility note about pgxmock in older docs is stale/unverified: the `TypeMap` build error came from `pgxmock/v2`. Re-check with `v5.2.0` + pgx `v5.11.0` and update this section.
-7. `main.go`: remove stale TODO comments; repo is created but unused until the service exists.
-8. `scheduler.go` is a stub. Do not extend it until step 10.
-9. Confirm `import _ "time/tzdata"` exists in `main`.
+7. ~~`main.go` stale TODOs~~ — done (step 12).
+8. ~~`scheduler.go` stub~~ — implemented (step 10).
+9. ~~`import _ "time/tzdata"` in `main`~~ — done.
 
 ---
 

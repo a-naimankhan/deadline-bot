@@ -2,20 +2,27 @@ package main
 
 import (
 	"context"
-	"deadline-bot/internal/config"
-	"deadline-bot/internal/logger"
-	"deadline-bot/internal/repository/postgres"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
+	_ "time/tzdata" // Asia/Almaty работает и в минимальном Docker-образе без системной tzdata
 
 	"github.com/joho/godotenv"
+	"golang.org/x/sync/errgroup"
+
+	"deadline-bot/internal/config"
+	"deadline-bot/internal/delivery/telegram"
+	"deadline-bot/internal/logger"
+	"deadline-bot/internal/repository/postgres"
+	"deadline-bot/internal/scheduler"
+	"deadline-bot/internal/service"
+	"deadline-bot/migrations"
 )
 
 func main() {
-	//TODO run the app
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -49,7 +56,6 @@ func loadDotEnv() error {
 
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-
 	defer stop()
 
 	if err := loadDotEnv(); err != nil {
@@ -61,7 +67,6 @@ func run() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	//TODO init logger
 	if err := logger.Init(cfg.LogLevel); err != nil {
 		return fmt.Errorf("init logger: %w", err)
 	}
@@ -74,15 +79,29 @@ func run() error {
 	}
 	defer pool.Close()
 
-	//TODO init repo
+	if err := postgres.Migrate(ctx, pool, migrations.FS); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+
 	repo := postgres.New(pool)
-	_ = repo //временно
+	svc := service.New(repo, cfg.Location, cfg.ReminderHour, time.Now)
 
-	//TODO init srv
+	bot, err := telegram.New(cfg.TelegramToken, cfg.OwnerChatID, svc, cfg.Location, time.Now)
+	if err != nil {
+		return fmt.Errorf("init bot: %w", err)
+	}
+	sched := scheduler.NewScheduler(repo, bot.Notifier(), cfg.Workers, cfg.Tick, time.Now)
 
-	//TODO init delivery
+	// Если одна часть упала с ошибкой, gctx отменяется и вторая тоже останавливается.
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return bot.Run(gctx) })
+	g.Go(func() error { return sched.Run(gctx) })
 
-	<-ctx.Done()
+	log.Info("bot is running")
+	err = g.Wait()
 	log.Info("shutting down bot")
+	if err != nil {
+		return fmt.Errorf("run: %w", err)
+	}
 	return nil
 }

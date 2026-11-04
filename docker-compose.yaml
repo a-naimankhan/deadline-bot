@@ -5,7 +5,8 @@ services:
       POSTGRES_USER: bot
       POSTGRES_PASSWORD: bot
       POSTGRES_DB: deadlines
-    ports: ["5432:5432"]
+    # 5433 на хосте: 5432 часто занят Postgres, установленным в Windows.
+    ports: ["5433:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
 volumes:
   pgdata:

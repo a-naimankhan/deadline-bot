@@ -32,7 +32,6 @@ func Load() (*Config, error) {
 	required := func(key string) string {
 		v := os.Getenv(key)
 		if v == "" {
-			fmt.Printf("%s is not set\n", key)
 			missing = append(missing, key)
 		}
 		return v
