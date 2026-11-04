@@ -17,6 +17,7 @@ type Config struct {
 	Tick          time.Duration
 	Workers       int
 	LogLevel      string
+	HTTPPort      int
 }
 
 const (
@@ -25,6 +26,7 @@ const (
 	defaultTick     = time.Minute
 	defaultWorkers  = 3
 	defaultLogLevel = "info"
+	defaultPort     = 8080
 )
 
 func Load() (*Config, error) {
@@ -49,6 +51,11 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("parse OWNER_CHAT_ID: %w", err)
 	}
 
+	port, err := LoadPort()
+	if err != nil {
+		return nil, err
+	}
+
 	loc, err := time.LoadLocation(defaultTZ)
 	if err != nil {
 		return nil, fmt.Errorf("load location %q: %w", defaultTZ, err)
@@ -68,5 +75,23 @@ func Load() (*Config, error) {
 		Tick:          defaultTick,
 		Workers:       defaultWorkers,
 		LogLevel:      logLevel,
+		HTTPPort:      port,
 	}, nil
+}
+
+// LoadPort читает необязательный PORT (по умолчанию 8080, допустимо 1..65535).
+// Отдельно от Load: режиму -healthcheck не нужны токен и DSN.
+func LoadPort() (int, error) {
+	raw := os.Getenv("PORT")
+	if raw == "" {
+		return defaultPort, nil
+	}
+	port, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("parse PORT: %w", err)
+	}
+	if port < 1 || port > 65535 {
+		return 0, fmt.Errorf("parse PORT: %d is out of range 1..65535", port)
+	}
+	return port, nil
 }

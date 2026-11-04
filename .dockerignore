@@ -1,0 +1,26 @@
+# VCS и IDE
+.git
+.gitignore
+.idea
+.vscode
+
+# секреты — никогда в контекст сборки
+.env
+.env.*
+
+# артефакты
+bin
+*.log
+*.test
+*.out
+coverage*
+
+# не нужно для сборки
+AGENTS
+README.md
+Dockerfile
+.dockerignore
+docker-compose.yaml
+.DS_Store
+go.work
+go.work.sum

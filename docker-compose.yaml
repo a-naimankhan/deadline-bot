@@ -8,5 +8,29 @@ services:
     # 5433 на хосте: 5432 часто занят Postgres, установленным в Windows.
     ports: ["5433:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bot -d deadlines"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Бот в контейнере — только по профилю: `docker compose up -d` для разработки поднимает одну БД
+  # и не конфликтует с `go run` (два поллера с одним токеном → 409 от Telegram).
+  # Запуск: docker compose --profile app up -d --build
+  bot:
+    build: .
+    profiles: ["app"]
+    env_file: .env
+    environment:
+      # Внутри сети compose БД — это db:5432, а не localhost:5433 из .env.
+      DATABASE_URL: postgres://bot:bot@db:5432/deadlines?sslmode=disable
+      PORT: "8080"
+    # Только localhost: снаружи /healthz не нужен.
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:

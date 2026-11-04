@@ -48,6 +48,9 @@ func TestLoad(t *testing.T) {
 				if cfg.Location.String() != "Asia/Almaty" {
 					t.Errorf("Location = %s, want Asia/Almaty", cfg.Location)
 				}
+				if cfg.HTTPPort != 8080 {
+					t.Errorf("HTTPPort = %d, want 8080", cfg.HTTPPort)
+				}
 			},
 		},
 		{
@@ -110,11 +113,59 @@ func TestLoad(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "PORT set explicitly",
+			setEnv: func() {
+				os.Setenv("TELEGRAM_BOT_TOKEN", "test-token")
+				os.Setenv("OWNER_CHAT_ID", "12345")
+				os.Setenv("DATABASE_URL", "postgres://localhost/test")
+				os.Setenv("PORT", "9090")
+			},
+			wantErr: false,
+			checkConfig: func(t *testing.T, cfg *Config) {
+				if cfg.HTTPPort != 9090 {
+					t.Errorf("HTTPPort = %d, want 9090", cfg.HTTPPort)
+				}
+			},
+		},
+		{
+			name: "PORT not a number",
+			setEnv: func() {
+				os.Setenv("TELEGRAM_BOT_TOKEN", "test-token")
+				os.Setenv("OWNER_CHAT_ID", "12345")
+				os.Setenv("DATABASE_URL", "postgres://localhost/test")
+				os.Setenv("PORT", "abc")
+			},
+			wantErr:     true,
+			errContains: "parse PORT",
+		},
+		{
+			name: "PORT zero",
+			setEnv: func() {
+				os.Setenv("TELEGRAM_BOT_TOKEN", "test-token")
+				os.Setenv("OWNER_CHAT_ID", "12345")
+				os.Setenv("DATABASE_URL", "postgres://localhost/test")
+				os.Setenv("PORT", "0")
+			},
+			wantErr:     true,
+			errContains: "parse PORT",
+		},
+		{
+			name: "PORT too large",
+			setEnv: func() {
+				os.Setenv("TELEGRAM_BOT_TOKEN", "test-token")
+				os.Setenv("OWNER_CHAT_ID", "12345")
+				os.Setenv("DATABASE_URL", "postgres://localhost/test")
+				os.Setenv("PORT", "70000")
+			},
+			wantErr:     true,
+			errContains: "parse PORT",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			keys := []string{"TELEGRAM_BOT_TOKEN", "OWNER_CHAT_ID", "DATABASE_URL", "LOG_LEVEL"}
+			keys := []string{"TELEGRAM_BOT_TOKEN", "OWNER_CHAT_ID", "DATABASE_URL", "LOG_LEVEL", "PORT"}
 			originalValues := make(map[string]string)
 			originalExisted := make(map[string]bool)
 
@@ -152,6 +203,58 @@ func TestLoad(t *testing.T) {
 			}
 			if tt.checkConfig != nil {
 				tt.checkConfig(t, cfg)
+			}
+		})
+	}
+}
+
+// TestLoadPort проверяет LoadPort отдельно от Load: режим healthcheck не должен требовать секреты.
+func TestLoadPort(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		set     bool
+		want    int
+		wantErr bool
+	}{
+		{name: "unset gives default", set: false, want: 8080},
+		{name: "empty gives default", value: "", set: true, want: 8080},
+		{name: "valid", value: "8081", set: true, want: 8081},
+		{name: "min boundary", value: "1", set: true, want: 1},
+		{name: "max boundary", value: "65535", set: true, want: 65535},
+		{name: "not a number", value: "abc", set: true, wantErr: true},
+		{name: "zero", value: "0", set: true, wantErr: true},
+		{name: "negative", value: "-1", set: true, wantErr: true},
+		{name: "just above max", value: "65536", set: true, wantErr: true},
+		{name: "way too large", value: "70000", set: true, wantErr: true},
+		{name: "with spaces", value: " 8080", set: true, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Секреты пустые: LoadPort не должен от них зависеть.
+			t.Setenv("TELEGRAM_BOT_TOKEN", "")
+			t.Setenv("OWNER_CHAT_ID", "")
+			t.Setenv("DATABASE_URL", "")
+			if tt.set {
+				t.Setenv("PORT", tt.value)
+			} else {
+				t.Setenv("PORT", "")
+				os.Unsetenv("PORT")
+			}
+
+			got, err := LoadPort()
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "PORT") {
+					t.Errorf("LoadPort() error = %v, want error containing PORT", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadPort() unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("LoadPort() = %d, want %d", got, tt.want)
 			}
 		})
 	}

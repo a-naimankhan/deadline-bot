@@ -1,7 +1,7 @@
 # Deadline Bot — AGENTS.md
 
 Single source of truth for humans and AI agents working on this repo.
-Last updated: 2026-10-29. If code and this file disagree, the code wins: fix this file.
+Last updated: 2026-11-04. If code and this file disagree, the code wins: fix this file.
 
 ---
 
@@ -52,7 +52,7 @@ Conventional style, one commit per step: `feat(config): ...`, `feat(repo): ...`,
 
 ## 3. Stack and environment
 
-- Go toolchain **1.27.1** installed (go.mod says 1.26.8 — fine; Dockerfile must use a matching Go image).
+- Go toolchain **1.27.1**; go.mod says `go 1.27.1`. The Dockerfile build stage uses `golang:1.27.1-alpine` — bump both together.
 - PostgreSQL via **pgx v5** (`v5.11.0`), `pgxpool`.
 - Migrations: **goose** v3.29.0 (`migrations/*.sql`), embedded via `migrations.FS` and applied at startup by `postgres.Migrate` (advisory lock against concurrent runs).
 - Telegram: `github.com/go-telegram/bot` (planned).
@@ -62,7 +62,7 @@ Conventional style, one commit per step: `feat(config): ...`, `feat(repo): ...`,
 - Owner develops on **Windows without CGO**. Some tooling runs in a Linux shell without C headers: keep `CGO_ENABLED=0` as default (see Makefile).
 
 ### Makefile targets
-`make fmt`, `make vet`, `make test`, `make test-race` (`CGO_ENABLED=1`, CI only), `make run`. Migrations run automatically when the bot starts.
+`make fmt`, `make vet`, `make test`, `make test-race` (`CGO_ENABLED=1`, CI only), `make run`, `make docker-build` (image `deadline-bot:dev`). Migrations run automatically when the bot starts.
 `CGO_ENABLED=0` must be the default for `vet`/`test` — pgx is pure Go, and a missing C toolchain must not break the build.
 
 ---
@@ -90,7 +90,7 @@ Layers: **delivery (telegram) → service → repo**. A layer knows the layer be
 | Subject | free text | no JOINs or management commands needed yet |
 | DB errors | mapped to domain errors in repo | DB may not always be Postgres |
 | Transactions | inside repo method (`CreateTask`), no UnitOfWork | personal bot, no over-engineering |
-| Config | env only for: `TELEGRAM_BOT_TOKEN`, `OWNER_CHAT_ID`, `DATABASE_URL`, `LOG_LEVEL`; the rest are constants | secrets + env-specific only |
+| Config | env only for: `TELEGRAM_BOT_TOKEN`, `OWNER_CHAT_ID`, `DATABASE_URL`, `LOG_LEVEL` (+ optional `PORT`, see below); the rest are constants | secrets + env-specific only |
 | `.env` | loaded in `main` (`loadDotEnv`, searches upward), never in `config.Load()`; missing file is not an error | hosting provides real env |
 | `config.Load()` | returns `(*Config, error)`, no panic; lists all missing vars | clean exit code 1 |
 | Logger | global singleton: `logger.Init(level) error` (sync.Once) + `logger.Get()` = `slog.Default()` | owner's explicit choice |
@@ -99,6 +99,9 @@ Layers: **delivery (telegram) → service → repo**. A layer knows the layer be
 | Input | manual `/add`; no Teams API | not available |
 | Hosting | free tier; code must stay host-independent (single Docker image + env) | free tiers change |
 | Postgres | chosen (also for the owner's interview) | — |
+| `PORT` (exception to "4 env vars") | optional 5th env var, default `8080`, valid `1..65535`; parsed by `config.LoadPort()` (used by `config.Load()` and by `-healthcheck`) | hosting platforms inject `PORT`; health server and Docker HEALTHCHECK need it |
+| Health endpoint | `GET /healthz` (`internal/delivery/health`): 200 `ok` if DB ping succeeds within 2s, else 503 `db unavailable`; error details only in logs | liveness for Docker/hosting without leaking internals |
+| Docker image | build `golang:1.27.1-alpine`, runtime `gcr.io/distroless/static-debian13:nonroot`; no shell, so `bot -healthcheck` (reads only `PORT`, no `.env`, no secrets) is the HEALTHCHECK | small attack surface, static CGO-free binary |
 
 ---
 
@@ -131,7 +134,8 @@ deadline-bot/
 ## 7. Configuration
 
 Required env: `TELEGRAM_BOT_TOKEN`, `OWNER_CHAT_ID` (int64), `DATABASE_URL`.
-Optional: `LOG_LEVEL` (default `info`).
+Optional: `LOG_LEVEL` (default `info`), `PORT` (default `8080`, `1..65535`; HTTP port of `/healthz` — the only exception to the 4-var rule, see decision log).
+`bot -healthcheck` reads only `PORT` (no `.env`, no secrets), GETs `http://127.0.0.1:$PORT/healthz`, exits 0 on 200 and 1 otherwise.
 Constants in `config`: timezone `Asia/Almaty`, `ReminderHour=12`, `Tick=1m`, `Workers=3`.
 Import `_ "time/tzdata"` in `main` so `LoadLocation` works in minimal Docker images.
 
@@ -227,7 +231,9 @@ cfg → logger → pool (`defer pool.Close()`) → repo → service → bot + no
 DoD: `/add`, `/list`, `/done` work locally; a test reminder with a deadline a few minutes ahead arrives.
 
 ### Step 13 — Release v1
-Multi-stage Dockerfile (Go image matching go.mod), GitHub Actions (`go vet`, `go test -race`, integration job with a Postgres service), README with a screenshot.
+- **13a (done):** `GET /healthz` + `bot -healthcheck`, optional `PORT`, multi-stage Dockerfile (`golang:1.27.1-alpine` → `distroless/static-debian13:nonroot`), `.dockerignore`, `bot` service in docker-compose (profile `app`), `make docker-build`.
+- **13b:** GitHub Actions (`go vet`, `go test -race`, integration job with a Postgres service).
+- **13c:** README (English) with a screenshot; refresh §6 "Current state".
 
 ---
 
@@ -267,5 +273,5 @@ Multi-stage Dockerfile (Go image matching go.mod), GitHub Actions (`go vet`, `go
 
 - The repository is **public**. `.env` is in `.gitignore`; `go.mod` and `go.sum` MUST be committed (never ignore `*.sum`).
 - If a bot token ever lands in git history: revoke it via @BotFather immediately.
-- Never put real credentials in tests; use mocks and a local docker-compose database (`bot/bot@localhost:5432/deadlines`).
+- Never put real credentials in tests; use mocks and a local docker-compose database (`bot/bot@localhost:5433/deadlines`).
 - `.gitignore` should cover: `.env`, `bin/`, `*.log`, `.DS_Store`, `go.work`, `go.work.sum`.
