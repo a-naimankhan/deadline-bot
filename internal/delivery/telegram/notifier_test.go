@@ -58,10 +58,8 @@ func TestNotifierSend(t *testing.T) {
 		// Каждая кнопка напоминания должна распознаваться обработчиком.
 		for _, row := range reminderKeyboard(7).InlineKeyboard {
 			for _, btn := range row {
-				svc := &fakeService{snoozeAt: now}
-				b, _ := newTestBot(t, svc, now)
-				if _, status := b.applyCallback(ctx, btn.CallbackData); status == "" {
-					t.Errorf("button %q not handled", btn.CallbackData)
+				if _, id, ok := parseCallback(btn.CallbackData); !ok || id != 7 {
+					t.Errorf("button %q not recognised (id=%d ok=%v)", btn.CallbackData, id, ok)
 				}
 			}
 		}

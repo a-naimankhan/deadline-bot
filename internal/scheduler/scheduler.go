@@ -87,6 +87,7 @@ func (s *Scheduler) dispatch(ctx context.Context, jobs chan<- domain.DueReminder
 		s.log.Error("claim due reminders", "err", err)
 		return
 	}
+	s.log.Debug("scheduler tick", "claimed", len(due))
 	for _, r := range due {
 		select {
 		case jobs <- r:
