@@ -169,10 +169,14 @@ func TestSnooze(t *testing.T) {
 
 	t.Run("3h", func(t *testing.T) {
 		repo := &fakeRepo{}
-		if err := newTestService(t, repo, now).Snooze(ctx, 3, 3*time.Hour); err != nil {
+		at, err := newTestService(t, repo, now).Snooze(ctx, 3, 3*time.Hour)
+		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		got := repo.added[0]
+		if !at.Equal(got.RemindAt) {
+			t.Errorf("returned %s, stored %s", at, got.RemindAt)
+		}
 		if got.TaskID != 3 || got.Kind != domain.KindSnooze || !got.RemindAt.Equal(now.Add(3*time.Hour)) {
 			t.Errorf("reminder = %+v", got)
 		}
@@ -182,7 +186,7 @@ func TestSnooze(t *testing.T) {
 	})
 
 	t.Run("non-positive duration", func(t *testing.T) {
-		err := newTestService(t, &fakeRepo{}, now).Snooze(ctx, 3, 0)
+		_, err := newTestService(t, &fakeRepo{}, now).Snooze(ctx, 3, 0)
 		if !errors.Is(err, domain.ErrInvalidInput) {
 			t.Errorf("err = %v, want ErrInvalidInput", err)
 		}
@@ -190,7 +194,7 @@ func TestSnooze(t *testing.T) {
 
 	t.Run("until tomorrow", func(t *testing.T) {
 		repo := &fakeRepo{}
-		if err := newTestService(t, repo, now).SnoozeUntilTomorrow(ctx, 3); err != nil {
+		if _, err := newTestService(t, repo, now).SnoozeUntilTomorrow(ctx, 3); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		want := time.Date(2026, time.October, 21, 12, 0, 0, 0, loc)
@@ -211,7 +215,7 @@ func TestSnooze(t *testing.T) {
 	for _, tt := range untilTomorrow {
 		t.Run("until tomorrow "+tt.name, func(t *testing.T) {
 			repo := &fakeRepo{}
-			if err := newTestService(t, repo, tt.now).SnoozeUntilTomorrow(ctx, 3); err != nil {
+			if _, err := newTestService(t, repo, tt.now).SnoozeUntilTomorrow(ctx, 3); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if got := repo.added[0].RemindAt; !got.Equal(tt.want) {
@@ -221,7 +225,7 @@ func TestSnooze(t *testing.T) {
 	}
 
 	t.Run("task not found", func(t *testing.T) {
-		err := newTestService(t, &fakeRepo{err: domain.ErrNotFound}, now).Snooze(ctx, 99, time.Hour)
+		_, err := newTestService(t, &fakeRepo{err: domain.ErrNotFound}, now).Snooze(ctx, 99, time.Hour)
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("err = %v, want ErrNotFound", err)
 		}

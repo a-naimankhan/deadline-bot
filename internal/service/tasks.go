@@ -80,17 +80,17 @@ func (s *Service) Done(ctx context.Context, taskID int64) error {
 	return nil
 }
 
-// Snooze ставит напоминание kind=snooze через d от текущего момента.
-func (s *Service) Snooze(ctx context.Context, taskID int64, d time.Duration) error {
+// Snooze ставит напоминание kind=snooze через d от текущего момента и возвращает его время (UTC).
+func (s *Service) Snooze(ctx context.Context, taskID int64, d time.Duration) (time.Time, error) {
 	if d <= 0 {
-		return fmt.Errorf("snooze duration %s: %w", d, domain.ErrInvalidInput)
+		return time.Time{}, fmt.Errorf("snooze duration %s: %w", d, domain.ErrInvalidInput)
 	}
 	return s.addSnooze(ctx, taskID, s.clock().Add(d))
 }
 
 // SnoozeUntilTomorrow ставит напоминание на ближайшие hour:00 по локальному времени:
 // до hour — сегодня (нажал ночью — значит «до утра»), иначе — завтра.
-func (s *Service) SnoozeUntilTomorrow(ctx context.Context, taskID int64) error {
+func (s *Service) SnoozeUntilTomorrow(ctx context.Context, taskID int64) (time.Time, error) {
 	now := s.clock().In(s.loc)
 	y, m, d := now.Date()
 	at := time.Date(y, m, d, s.hour, 0, 0, 0, s.loc)
@@ -100,14 +100,14 @@ func (s *Service) SnoozeUntilTomorrow(ctx context.Context, taskID int64) error {
 	return s.addSnooze(ctx, taskID, at)
 }
 
-func (s *Service) addSnooze(ctx context.Context, taskID int64, at time.Time) error {
+func (s *Service) addSnooze(ctx context.Context, taskID int64, at time.Time) (time.Time, error) {
 	err := s.repo.AddReminder(ctx, domain.Reminder{
 		TaskID:   taskID,
 		Kind:     domain.KindSnooze,
 		RemindAt: at.UTC(),
 	})
 	if err != nil {
-		return fmt.Errorf("snooze task %d: %w", taskID, err)
+		return time.Time{}, fmt.Errorf("snooze task %d: %w", taskID, err)
 	}
-	return nil
+	return at.UTC(), nil
 }

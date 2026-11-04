@@ -192,8 +192,8 @@ type AddTaskInput struct{ Subject, Title, Details string; Deadline time.Time }
 func (s *Service) AddTask(ctx, in AddTaskInput) (domain.Task, error) // ErrInvalidInput: empty subject/title, deadline not in future
 func (s *Service) ListActive(ctx) ([]domain.Task, error)
 func (s *Service) Done(ctx, taskID int64) error
-func (s *Service) Snooze(ctx, taskID int64, d time.Duration) error        // reminder kind=snooze at now+d
-func (s *Service) SnoozeUntilTomorrow(ctx, taskID int64) error            // nearest upcoming ReminderHour local: today if before it, else tomorrow
+func (s *Service) Snooze(ctx, taskID int64, d time.Duration) (time.Time, error) // reminder kind=snooze at now+d; returns its time (UTC)
+func (s *Service) SnoozeUntilTomorrow(ctx, taskID int64) (time.Time, error)   // nearest upcoming ReminderHour local: today if before it, else tomorrow
 ```
 Snoozing past the deadline is allowed on purpose: the planned `nag`s keep firing on the deadline day anyway.
 Tests with a fake repo and a fake clock.
