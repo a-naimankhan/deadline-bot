@@ -65,6 +65,8 @@ Conventional style, one commit per step: `feat(config): ...`, `feat(repo): ...`,
 `make fmt`, `make vet`, `make test`, `make test-race` (`CGO_ENABLED=1`, CI only), `make run`, `make docker-build` (image `deadline-bot:dev`). Migrations run automatically when the bot starts.
 `CGO_ENABLED=0` must be the default for `vet`/`test` — pgx is pure Go, and a missing C toolchain must not break the build.
 
+CI: GitHub Actions (`.github/workflows/ci.yml`) runs gofmt/vet/race tests, the integration test against a Postgres service, and `docker build` on every push to `master` and every PR. The race detector runs only there.
+
 ---
 
 ## 4. Architecture and conventions
@@ -232,7 +234,7 @@ DoD: `/add`, `/list`, `/done` work locally; a test reminder with a deadline a fe
 
 ### Step 13 — Release v1
 - **13a (done):** `GET /healthz` + `bot -healthcheck`, optional `PORT`, multi-stage Dockerfile (`golang:1.27.1-alpine` → `distroless/static-debian13:nonroot`), `.dockerignore`, `bot` service in docker-compose (profile `app`), `make docker-build`.
-- **13b:** GitHub Actions (`go vet`, `go test -race`, integration job with a Postgres service).
+- **13b (done):** GitHub Actions `.github/workflows/ci.yml` on push to `master` and on PRs: job `test` (gofmt check, `go vet ./...`, `go test -race ./...` with `CGO_ENABLED=1`), job `integration` (`postgres:16` service, `go test -tags integration ./internal/repository/postgres`), job `docker` (`docker build`, no push). Superseded PR runs are cancelled; `permissions: contents: read`.
 - **13c:** README (English) with a screenshot; refresh §6 "Current state".
 
 ---
@@ -251,6 +253,7 @@ DoD: `/add`, `/list`, `/done` work locally; a test reminder with a deadline a fe
 - `pgxmock/v5` tests only for cheap repo concerns: **error mapping** (`errors.Is(err, domain.ErrNotFound)`), behavior on DB errors (error wrapped and NOT `ErrNotFound`), FK violation (`&pgconn.PgError{Code: "23503"}`).
 - **Real Postgres** (tag `integration`, `TEST_DATABASE_URL`) for anything where SQL behavior matters, especially `ClaimDue` (second claim must not return the same reminder).
   `go test -tags integration ./internal/repository/postgres`
+  The test applies migrations itself (`postgres.Migrate(ctx, pool, migrations.FS)`), so it works on an empty DB (CI) and on an already-migrated one, and it deletes its own data in `t.Cleanup`. Locally, use a throwaway container on a free port (5432 and 5433 are taken).
 - If pgxmock keeps fighting the pgx version, the fallback decided in advance: drop mock tests for the repo and rely on integration tests. Do not burn time on version juggling.
 
 ---

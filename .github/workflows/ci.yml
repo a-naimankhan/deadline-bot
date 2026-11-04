@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "Files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: |
+          go vet ./...
+          go vet -tags integration ./...
+
+      - name: go test -race
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race ./...
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bot
+          POSTGRES_PASSWORD: bot
+          POSTGRES_DB: deadlines
+        ports:
+          - 5432:5432
+        # -h 127.0.0.1: проверяем TCP, а не unix-сокет временного init-сервера.
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U bot -d deadlines"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://bot:bot@localhost:5432/deadlines?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: integration tests
+        env:
+          CGO_ENABLED: "0"
+        run: go test -count=1 -v -tags integration ./internal/repository/postgres
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: docker build
+        run: docker build -t deadline-bot:ci .

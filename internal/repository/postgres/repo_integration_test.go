@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"deadline-bot/internal/domain"
+	"deadline-bot/migrations"
 )
 
 func containsTask(list []domain.DueReminder, taskID int64) bool {
@@ -32,6 +33,10 @@ func TestClaimDueDoesNotReturnSameReminderTwice(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
+	// В CI база пустая. На уже мигрированной базе goose ничего не делает.
+	if err := Migrate(ctx, pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
 	repo := New(pool)
 
 	now := time.Now().UTC()
