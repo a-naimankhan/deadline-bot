@@ -55,7 +55,7 @@ Conventional style, one commit per step: `feat(config): ...`, `feat(repo): ...`,
 - Go toolchain **1.27.1**; go.mod says `go 1.27.1`. The Dockerfile build stage uses `golang:1.27.1-alpine` — bump both together.
 - PostgreSQL via **pgx v5** (`v5.11.0`), `pgxpool`.
 - Migrations: **goose** v3.29.0 (`migrations/*.sql`), embedded via `migrations.FS` and applied at startup by `postgres.Migrate` (advisory lock against concurrent runs).
-- Telegram: `github.com/go-telegram/bot` (planned).
+- Telegram: `github.com/go-telegram/bot` v1.27.0 (long polling); `golang.org/x/time/rate` limits reminder sends; `golang.org/x/sync/errgroup` in `main`.
 - Logging: stdlib `log/slog`, JSON, global (see decisions).
 - Env: `github.com/joho/godotenv` (only in `main`).
 - Tests: stdlib `testing`; `pgxmock/v5` (`v5.2.0`) for cheap unit tests; real Postgres for integration tests.
@@ -107,28 +107,35 @@ Layers: **delivery (telegram) → service → repo**. A layer knows the layer be
 
 ---
 
-## 6. Current state (2026-10-29)
+## 6. Current state (2026-11-04)
 
-**Done:** config (+tests), logger, `main` skeleton (loadDotEnv, config, logger, pool, repo, graceful shutdown), domain, migrations, repository (tasks + reminders) with unit tests and an integration test.
+**Done (stage 1, v1):** config (+`LoadPort`), JSON slog logger, domain; migrations embedded via `migrations.FS` and applied at startup (`postgres.Migrate`, goose + advisory lock); repository (tasks + reminders, `ClaimDue` lease with `FOR UPDATE OF r SKIP LOCKED`) with pgxmock unit tests and an integration test; service (`PlanReminders` with d2/d1/dday + up to 6 nags, task service with add/list/done/snooze/snooze-until-tomorrow); Telegram delivery (`/start`, `/help`, `/add`, `/list`, `/done`, `/snooze`, inline buttons, owner-only filter, rate-limited notifier, one log line per command/callback); scheduler (ticker + worker pool, at-least-once, graceful shutdown); wiring in `main` with `errgroup`; `GET /healthz` + `bot -healthcheck`; distroless Dockerfile; docker-compose (`db`, `bot` under profile `app`); GitHub Actions CI; README (English, CI badge).
 
-**Not done:** service layer, Telegram delivery, scheduler logic, wiring in `main`, nagging rules, NetAcad, parsing microservice, Dockerfile/CI, README.
+**Not done:** README screenshot (placeholder comment; owner adds `docs/screenshot.png`), LICENSE (owner to choose), deploy (stage 4), NetAcad tracker (stage 2; only the `netacad_goals` table exists), parsing microservice (stage 3).
 
 ### Structure
 ```
 deadline-bot/
+├── .github/workflows/ci.yml
+├── AGENTS/AGENTS.md
 ├── cmd/bot/main.go
 ├── internal/
-│   ├── config/            config.go, config_test.go
-│   ├── domain/            errors.go, reminder.go, task.go
-│   ├── logger/            slogger.go
+│   ├── config/              config.go, config_test.go
+│   ├── delivery/
+│   │   ├── health/          health.go, check.go, health_test.go, check_test.go
+│   │   └── telegram/        bot.go, notifier.go, parse.go,
+│   │                        bot_test.go, log_test.go, notifier_test.go, parse_test.go
+│   ├── domain/              errors.go, reminder.go, task.go
+│   ├── logger/              slogger.go
 │   ├── repository/postgres/
-│   │     pool.go, repo.go, tasks.go, reminders.go,
+│   │     migrate.go, pool.go, repo.go, tasks.go, reminders.go,
 │   │     *_test.go, repo_integration_test.go (tag: integration)
-│   ├── scheduler/         scheduler.go   (interfaces + TODO)
-│   ├── service/           (empty)
-│   └── delivery/telegram/ (planned, see cleanup item 3)
-├── migrations/            00001_init.sql, 00002_claim.sql
+│   ├── scheduler/           scheduler.go, scheduler_test.go, iface_check_test.go
+│   └── service/             planner.go, tasks.go, planner_test.go, tasks_test.go
+├── migrations/              00001_init.sql, 00002_claim.sql, embed.go
+├── Dockerfile, .dockerignore, docker-compose.yaml
 ├── Makefile, go.mod, go.sum, .env.example, .gitignore
+└── README.md
 ```
 
 ---
@@ -145,11 +152,11 @@ Import `_ "time/tzdata"` in `main` so `LoadLocation` works in minimal Docker ima
 
 ## 8. Database schema
 
-`tasks`: `id BIGSERIAL PK, subject TEXT, title TEXT, details TEXT DEFAULT '', deadline TIMESTAMPTZ, done_at TIMESTAMPTZ NULL, created_at TIMESTAMPTZ DEFAULT now()`. Partial index on `deadline WHERE done_at IS NULL`.
+`tasks`: `id BIGSERIAL PK, subject TEXT NOT NULL, title TEXT NOT NULL, details TEXT NOT NULL DEFAULT '', deadline TIMESTAMPTZ NOT NULL, done_at TIMESTAMPTZ NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()`. No index on `deadline` (personal scale).
 
-`reminders`: `id BIGSERIAL PK, task_id → tasks ON DELETE CASCADE, kind TEXT CHECK IN ('d2','d1','dday','nag','snooze'), remind_at TIMESTAMPTZ, claimed_at TIMESTAMPTZ NULL, sent_at TIMESTAMPTZ NULL`. Partial index `reminders_due_idx (remind_at) WHERE sent_at IS NULL`.
+`reminders`: `id BIGSERIAL PK, task_id BIGINT NOT NULL → tasks ON DELETE CASCADE, kind TEXT NOT NULL ('d2','d1','dday','nag','snooze'; set only from `domain.Kind*` constants, no CHECK constraint), remind_at TIMESTAMPTZ NOT NULL, claimed_at TIMESTAMPTZ NULL (00002), sent_at TIMESTAMPTZ NULL`. Partial index `reminders_due_idx (remind_at) WHERE sent_at IS NULL`.
 
-`netacad_goals` (stage 2): `id, total_topics, per_day, done_topics, start_date, end_date, active`.
+`netacad_goals` (created in 00001, unused until stage 2): `id, total_topics, per_day, done_topics, start_date, end_date, active`.
 NetAcad **debt is computed, not stored**: `debt = per_day × elapsed_days − done_topics`.
 
 ---
@@ -174,6 +181,8 @@ Done tasks never reach `ClaimDue`, so their pending reminders need no cleanup.
 ---
 
 ## 10. Specs for the next steps
+
+Steps 6–13 are implemented; their specs are kept as a design record.
 
 ### Step 6 — `internal/service/planner.go` (pure function)
 ```go
@@ -235,7 +244,7 @@ DoD: `/add`, `/list`, `/done` work locally; a test reminder with a deadline a fe
 ### Step 13 — Release v1
 - **13a (done):** `GET /healthz` + `bot -healthcheck`, optional `PORT`, multi-stage Dockerfile (`golang:1.27.1-alpine` → `distroless/static-debian13:nonroot`), `.dockerignore`, `bot` service in docker-compose (profile `app`), `make docker-build`.
 - **13b (done):** GitHub Actions `.github/workflows/ci.yml` on push to `master` and on PRs: job `test` (gofmt check, `go vet ./...`, `go test -race ./...` with `CGO_ENABLED=1`), job `integration` (`postgres:16` service, `go test -tags integration ./internal/repository/postgres`), job `docker` (`docker build`, no push). Superseded PR runs are cancelled; `permissions: contents: read`.
-- **13c:** README (English) with a screenshot; refresh §6 "Current state".
+- **13c (done):** README (English) covering what/why, reminder rules, commands, architecture and concurrency, configuration, quick start, testing, layout, design decisions, limitations and roadmap, with the CI badge; §6 refreshed. Screenshot pending: README has an HTML-comment placeholder for `docs/screenshot.png`, the owner adds the file.
 
 ---
 
@@ -265,10 +274,11 @@ DoD: `/add`, `/list`, `/done` work locally; a test reminder with a deadline a fe
 3. ~~empty `internal/transport-telegram/`~~ — removed.
 4. ~~`reminders_test.go` t.Skip stubs~~ — already real tests.
 5. ~~`tasks_test.go` error cases~~ — fixed (55ec694).
-6. Compatibility note about pgxmock in older docs is stale/unverified: the `TypeMap` build error came from `pgxmock/v2`. Re-check with `v5.2.0` + pgx `v5.11.0` and update this section.
+6. ~~pgxmock compatibility note~~ — verified 2026-11-04: `go test ./...` passes with pgxmock `v5.2.0` + pgx `v5.11.0` (the old `TypeMap` error came from `pgxmock/v2`).
 7. ~~`main.go` stale TODOs~~ — done (step 12).
 8. ~~`scheduler.go` stub~~ — implemented (step 10).
 9. ~~`import _ "time/tzdata"` in `main`~~ — done.
+10. /snooze on an already-done task replies "Напомню…" but the reminder never fires (ClaimDue skips done tasks). Minor UX, not fixed.
 
 ---
 
