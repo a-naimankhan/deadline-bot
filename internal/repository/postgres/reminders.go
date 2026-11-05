@@ -54,7 +54,7 @@ WITH due AS (
 	RETURNING r.id, r.task_id, r.kind, r.remind_at
 )
 SELECT c.id, c.task_id, c.kind, c.remind_at,
-       t.id, t.subject, t.title, t.details, t.deadline, t.done_at, t.created_at
+       t.id, t.subject, t.title, t.details, t.file_id, t.deadline, t.done_at, t.created_at
 FROM claimed c
 JOIN tasks t ON t.id = c.task_id
 ORDER BY c.remind_at`
@@ -77,7 +77,7 @@ func scanDue(row pgx.CollectableRow) (domain.DueReminder, error) {
 	var kind string
 	err := row.Scan(
 		&d.ID, &d.TaskID, &kind, &d.RemindAt,
-		&d.Task.ID, &d.Task.Subject, &d.Task.Title, &d.Task.Details,
+		&d.Task.ID, &d.Task.Subject, &d.Task.Title, &d.Task.Details, &d.Task.FileID,
 		&d.Task.Deadline, &d.Task.DoneAt, &d.Task.CreatedAt,
 	)
 	if err != nil {

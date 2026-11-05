@@ -7,6 +7,7 @@ type Task struct {
 	Subject   string
 	Title     string
 	Details   string
+	FileID    string // file_id вложения в Telegram, пусто — без файла
 	Deadline  time.Time
 	DoneAt    *time.Time
 	CreatedAt time.Time

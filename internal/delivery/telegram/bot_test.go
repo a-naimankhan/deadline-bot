@@ -21,6 +21,7 @@ type fakeSender struct {
 	sent     []*bot.SendMessageParams
 	answered []*bot.AnswerCallbackQueryParams
 	edited   []*bot.EditMessageTextParams
+	docs     []*bot.SendDocumentParams
 	sendErr  error
 }
 
@@ -29,6 +30,14 @@ func (f *fakeSender) SendMessage(_ context.Context, p *bot.SendMessageParams) (*
 		return nil, f.sendErr
 	}
 	f.sent = append(f.sent, p)
+	return &models.Message{}, nil
+}
+
+func (f *fakeSender) SendDocument(_ context.Context, p *bot.SendDocumentParams) (*models.Message, error) {
+	if f.sendErr != nil {
+		return nil, f.sendErr
+	}
+	f.docs = append(f.docs, p)
 	return &models.Message{}, nil
 }
 
@@ -61,6 +70,18 @@ func (f *fakeService) AddTask(_ context.Context, in service.AddTaskInput) (domai
 }
 
 func (f *fakeService) ListActive(context.Context) ([]domain.Task, error) { return f.tasks, f.err }
+
+func (f *fakeService) GetTask(_ context.Context, id int64) (domain.Task, error) {
+	if f.err != nil {
+		return domain.Task{}, f.err
+	}
+	for _, t := range f.tasks {
+		if t.ID == id {
+			return t, nil
+		}
+	}
+	return domain.Task{}, domain.ErrNotFound
+}
 
 func (f *fakeService) Done(_ context.Context, id int64) error {
 	if f.err != nil {

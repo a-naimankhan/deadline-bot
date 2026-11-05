@@ -11,12 +11,12 @@ import (
 	"deadline-bot/internal/domain"
 )
 
-const taskColumns = `id, subject, title, details, deadline, done_at, created_at`
+const taskColumns = `id, subject, title, details, file_id, deadline, done_at, created_at`
 
 // scanTask читает строку задачи и приводит все времена к UTC.
 func scanTask(row pgx.Row) (domain.Task, error) {
 	var t domain.Task
-	err := row.Scan(&t.ID, &t.Subject, &t.Title, &t.Details, &t.Deadline, &t.DoneAt, &t.CreatedAt)
+	err := row.Scan(&t.ID, &t.Subject, &t.Title, &t.Details, &t.FileID, &t.Deadline, &t.DoneAt, &t.CreatedAt)
 	if err != nil {
 		return domain.Task{}, err
 	}
@@ -42,10 +42,10 @@ func (r *Repo) CreateTask(ctx context.Context, t domain.Task, rem []domain.Remin
 	defer tx.Rollback(ctx) //nolint:errcheck // после Commit это no-op
 
 	err = tx.QueryRow(ctx, `
-		INSERT INTO tasks (subject, title, details, deadline)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO tasks (subject, title, details, file_id, deadline)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, created_at`,
-		t.Subject, t.Title, t.Details, t.Deadline.UTC(),
+		t.Subject, t.Title, t.Details, t.FileID, t.Deadline.UTC(),
 	).Scan(&t.ID, &t.CreatedAt)
 	if err != nil {
 		return domain.Task{}, fmt.Errorf("insert task: %w", err)

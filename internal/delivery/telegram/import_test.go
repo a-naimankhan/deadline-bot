@@ -211,3 +211,107 @@ func TestImportFlow(t *testing.T) {
 		}
 	})
 }
+
+func pdfMessage(caption string) *models.Update {
+	return &models.Update{Message: &models.Message{
+		Chat:     models.Chat{ID: ownerID},
+		Caption:  caption,
+		Document: &models.Document{FileID: "pdf-1", FileName: "assignment.pdf", MimeType: "application/pdf"},
+	}}
+}
+
+func TestImportWithFile(t *testing.T) {
+	loc := almaty(t)
+	now := time.Date(2026, time.November, 5, 10, 0, 0, 0, loc)
+	ctx := context.Background()
+
+	t.Run("pdf with caption", func(t *testing.T) {
+		svc := &fakeService{}
+		b, api := newTestBot(t, svc, now)
+		b.handle(ctx, pdfMessage(teamsAssignment4))
+		if got := lastText(t, api); !strings.Contains(got, "📎 Файл прикреплён") {
+			t.Errorf("draft = %q", got)
+		}
+		add, _ := draftButtons(t, api)
+		b.handle(ctx, callback(ownerID, add))
+		if len(svc.added) != 1 || svc.added[0].FileID != "pdf-1" {
+			t.Fatalf("added = %+v", svc.added)
+		}
+	})
+
+	t.Run("text then pdf attaches to latest draft", func(t *testing.T) {
+		svc := &fakeService{}
+		b, api := newTestBot(t, svc, now)
+		b.handle(ctx, message(ownerID, teamsFBIS))
+		b.handle(ctx, message(ownerID, teamsAssignment4))
+		b.handle(ctx, pdfMessage(""))
+
+		got := lastText(t, api)
+		if !strings.Contains(got, "Прикрепил") || !strings.Contains(got, "Assignment 4") {
+			t.Errorf("reply = %q", got)
+		}
+		add, _ := draftButtons(t, api)
+		b.handle(ctx, callback(ownerID, add))
+		if len(svc.added) != 1 || svc.added[0].Title != "Assignment 4" || svc.added[0].FileID != "pdf-1" {
+			t.Fatalf("added = %+v", svc.added)
+		}
+	})
+
+	t.Run("old draft buttons see the attached file", func(t *testing.T) {
+		svc := &fakeService{}
+		b, api := newTestBot(t, svc, now)
+		b.handle(ctx, message(ownerID, teamsFBIS))
+		oldAdd, _ := draftButtons(t, api)
+		b.handle(ctx, pdfMessage(""))
+		b.handle(ctx, callback(ownerID, oldAdd))
+		if len(svc.added) != 1 || svc.added[0].FileID != "pdf-1" {
+			t.Fatalf("added = %+v", svc.added)
+		}
+	})
+
+	t.Run("pdf without caption and no draft", func(t *testing.T) {
+		svc := &fakeService{}
+		b, api := newTestBot(t, svc, now)
+		b.handle(ctx, pdfMessage(""))
+		if got := lastText(t, api); !strings.Contains(got, "не к чему прикрепить") {
+			t.Errorf("reply = %q", got)
+		}
+	})
+
+	t.Run("file button sends document and keeps buttons", func(t *testing.T) {
+		svc := &fakeService{tasks: []domain.Task{{ID: 7, Subject: "БИС", Title: "Lab", FileID: "pdf-1"}}}
+		b, api := newTestBot(t, svc, now)
+		b.handle(ctx, callback(ownerID, "file:7"))
+		if len(api.docs) != 1 {
+			t.Fatalf("docs = %d, want 1", len(api.docs))
+		}
+		if f, ok := api.docs[0].Document.(*models.InputFileString); !ok || f.Data != "pdf-1" {
+			t.Errorf("document = %+v", api.docs[0].Document)
+		}
+		if len(api.edited) != 0 {
+			t.Error("reminder must keep its buttons after file request")
+		}
+	})
+
+	t.Run("file button on task without file", func(t *testing.T) {
+		svc := &fakeService{tasks: []domain.Task{{ID: 7, Subject: "БИС", Title: "Lab"}}}
+		b, api := newTestBot(t, svc, now)
+		b.handle(ctx, callback(ownerID, "file:7"))
+		if len(api.docs) != 0 {
+			t.Error("nothing to send")
+		}
+		if a := api.answered[0].Text; !strings.Contains(a, "файл не прикреплён") {
+			t.Errorf("answer = %q", a)
+		}
+	})
+
+	t.Run("list marks tasks with files", func(t *testing.T) {
+		svc := &fakeService{tasks: []domain.Task{{ID: 7, Subject: "БИС", Title: "Lab", FileID: "pdf-1",
+			Deadline: now.Add(48 * time.Hour)}}}
+		b, api := newTestBot(t, svc, now)
+		b.handle(ctx, message(ownerID, "/list"))
+		if got := lastText(t, api); !strings.Contains(got, "#7 БИС — Lab 📎") {
+			t.Errorf("list = %q", got)
+		}
+	})
+}

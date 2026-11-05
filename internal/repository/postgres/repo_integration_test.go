@@ -41,7 +41,7 @@ func TestClaimDueDoesNotReturnSameReminderTwice(t *testing.T) {
 
 	now := time.Now().UTC()
 	task, err := repo.CreateTask(ctx,
-		domain.Task{Subject: "TEST", Title: "claim test", Deadline: now.Add(48 * time.Hour)},
+		domain.Task{Subject: "TEST", Title: "claim test", FileID: "file-123", Deadline: now.Add(48 * time.Hour)},
 		[]domain.Reminder{{Kind: domain.KindD1, RemindAt: now.Add(-time.Minute)}},
 	)
 	if err != nil {
@@ -55,6 +55,15 @@ func TestClaimDueDoesNotReturnSameReminderTwice(t *testing.T) {
 	}
 	if !containsTask(first, task.ID) {
 		t.Fatal("first claim should return the reminder")
+	}
+	for _, d := range first {
+		if d.TaskID == task.ID && d.Task.FileID != "file-123" {
+			t.Errorf("claimed task file_id = %q, want file-123", d.Task.FileID)
+		}
+	}
+	got, err := repo.GetTask(ctx, task.ID)
+	if err != nil || got.FileID != "file-123" {
+		t.Errorf("GetTask file_id = %q, err = %v", got.FileID, err)
 	}
 
 	second, err := repo.ClaimDue(ctx, now, 50)

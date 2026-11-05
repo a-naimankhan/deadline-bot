@@ -13,6 +13,7 @@ import (
 type TaskRepo interface {
 	CreateTask(ctx context.Context, t domain.Task, rem []domain.Reminder) (domain.Task, error)
 	ListActive(ctx context.Context) ([]domain.Task, error)
+	GetTask(ctx context.Context, id int64) (domain.Task, error)
 	MarkDone(ctx context.Context, id int64, at time.Time) error
 	AddReminder(ctx context.Context, rem domain.Reminder) error
 }
@@ -32,6 +33,7 @@ type AddTaskInput struct {
 	Subject  string
 	Title    string
 	Details  string
+	FileID   string // file_id вложения в Telegram, необязательно
 	Deadline time.Time
 }
 
@@ -43,6 +45,7 @@ func (s *Service) AddTask(ctx context.Context, in AddTaskInput) (domain.Task, er
 		Subject:  strings.TrimSpace(in.Subject),
 		Title:    strings.TrimSpace(in.Title),
 		Details:  strings.TrimSpace(in.Details),
+		FileID:   in.FileID,
 		Deadline: in.Deadline.UTC(),
 	}
 	if t.Subject == "" {
@@ -70,6 +73,15 @@ func (s *Service) ListActive(ctx context.Context) ([]domain.Task, error) {
 		return nil, fmt.Errorf("list active: %w", err)
 	}
 	return tasks, nil
+}
+
+// GetTask возвращает задачу по id. Нет такой — domain.ErrNotFound.
+func (s *Service) GetTask(ctx context.Context, id int64) (domain.Task, error) {
+	t, err := s.repo.GetTask(ctx, id)
+	if err != nil {
+		return domain.Task{}, fmt.Errorf("get task: %w", err)
+	}
+	return t, nil
 }
 
 // Done отмечает задачу сданной. Нет задачи или она уже сдана — domain.ErrNotFound.
