@@ -1,7 +1,7 @@
 # Deadline Bot — AGENTS.md
 
 Single source of truth for humans and AI agents working on this repo.
-Last updated: 2026-11-04. If code and this file disagree, the code wins: fix this file.
+Last updated: 2026-11-05. If code and this file disagree, the code wins: fix this file.
 
 ---
 
@@ -11,8 +11,9 @@ A personal Telegram bot in Go for ONE user (the owner; authorization by `OWNER_C
 Nickname: "mini Jarvis". It is also a public pet project for GitHub / portfolio, so code quality and honest README matter.
 
 ### Features
-1. **University deadlines.** The owner has no API access to MS Teams (Assignments), so he adds tasks manually:
-   `/add БИС | Lab 5 | 23.10 23:59`.
+1. **University deadlines.** The owner has no API access to MS Teams (Assignments). Tasks come in two ways:
+   - paste the assignment text from Teams (first line = subject) → draft with «Добавить ✅ / Отмена» → task; the PDF can be attached (caption or next message) and is resent by the «📎 Задание» reminder button;
+   - manual `/add БИС | Lab 5 | 23.10 23:59`.
    The bot sends reminders at **12:00 Asia/Almaty**: 2 days before, 1 day before, and on the deadline day (loud message: "СЕГОДНЯ ДЕДЛАЙН, СДАЙ").
    Every reminder has inline buttons: **Сдал ✅**, **Отложить на 3ч**, **До завтра**.
    If a task is not done, the bot keeps nagging ("душит") until the owner presses Сдал.
@@ -98,7 +99,12 @@ Layers: **delivery (telegram) → service → repo**. A layer knows the layer be
 | Logger | global singleton: `logger.Init(level) error` (sync.Once) + `logger.Get()` = `slog.Default()` | owner's explicit choice |
 | Log level | text `debug\|info\|warn\|error`, default `info`; validated only in logger | single place of validation |
 | Reminder time | 12:00 local, constant in code | owner may lower it later |
-| Input | manual `/add`; no Teams API | not available |
+| Input | manual `/add` + paste-to-import of Teams text (subject on the first line, `Срок заканчивается …` line); no Teams API | API not available; the bot runs on a server, so nothing can be read from the owner's devices |
+| Import parser | regexp in `delivery/telegram/import.go`, no LLM | no paid API (owner's choice); deterministic and testable |
+| Import confirmation | draft with buttons; nothing is written before «Добавить» | parser mistakes cost one tap, not a wrong task with reminders |
+| Import drafts | in memory (`draftStore`), TTL 24h, single-use (`take`) | one owner; resending after a restart is cheap; no extra table |
+| Attachments | only Telegram `file_id` in `tasks.file_id` (00003); a caption-less document attaches to the latest live draft | no file storage on the server |
+| Free text | any message without `/` goes to import; unknown `/commands` still get help | paste must work without a command |
 | Hosting | free tier; code must stay host-independent (single Docker image + env) | free tiers change |
 | Postgres | chosen (also for the owner's interview) | — |
 | `PORT` (exception to "4 env vars") | optional 5th env var, default `8080`, valid `1..65535`; parsed by `config.LoadPort()` (used by `config.Load()` and by `-healthcheck`) | hosting platforms inject `PORT`; health server and Docker HEALTHCHECK need it |
@@ -107,11 +113,13 @@ Layers: **delivery (telegram) → service → repo**. A layer knows the layer be
 
 ---
 
-## 6. Current state (2026-11-04)
+## 6. Current state (2026-11-05)
 
 **Done (stage 1, v1):** config (+`LoadPort`), JSON slog logger, domain; migrations embedded via `migrations.FS` and applied at startup (`postgres.Migrate`, goose + advisory lock); repository (tasks + reminders, `ClaimDue` lease with `FOR UPDATE OF r SKIP LOCKED`) with pgxmock unit tests and an integration test; service (`PlanReminders` with d2/d1/dday + up to 6 nags, task service with add/list/done/snooze/snooze-until-tomorrow); Telegram delivery (`/start`, `/help`, `/add`, `/list`, `/done`, `/snooze`, inline buttons, owner-only filter, rate-limited notifier, one log line per command/callback); scheduler (ticker + worker pool, at-least-once, graceful shutdown); wiring in `main` with `errgroup`; `GET /healthz` + `bot -healthcheck`; distroless Dockerfile; docker-compose (`db`, `bot` under profile `app`); GitHub Actions CI; README (English, CI badge).
 
-**Not done:** README screenshot (placeholder comment; owner adds `docs/screenshot.png`), LICENSE (owner to choose), deploy (stage 4), NetAcad tracker (stage 2; only the `netacad_goals` table exists), parsing microservice (stage 3).
+**Done (Teams import, branch `feat/import-from-teams`):** `ParseImport` (Russian Teams format, validation: future date within a year, real date/time, length limits), drafts with «Добавить ✅ / Отмена» (`imp:<draft>`, `impx:<draft>`), duplicate warning against active tasks, `draft_id` in logs; PDF attachment via `tasks.file_id` (migration 00003), «📎 Задание» reminder button (`file:<id>`, keeps the reminder buttons), 📎 in `/list`; `GetTask` in service and `telegram.TaskService`; `SendDocument` in the `sender` interface.
+
+**Not done:** README screenshot (placeholder comment; owner adds `docs/screenshot.png`), LICENSE (owner to choose), deploy (stage 4), NetAcad tracker (stage 2; only the `netacad_goals` table exists), Teams e-mail import over IMAP (next import step), parsing microservice (stage 3).
 
 ### Structure
 ```
@@ -123,8 +131,8 @@ deadline-bot/
 │   ├── config/              config.go, config_test.go
 │   ├── delivery/
 │   │   ├── health/          health.go, check.go, health_test.go, check_test.go
-│   │   └── telegram/        bot.go, notifier.go, parse.go,
-│   │                        bot_test.go, log_test.go, notifier_test.go, parse_test.go
+│   │   └── telegram/        bot.go, notifier.go, parse.go, import.go, drafts.go,
+│   │                        bot_test.go, log_test.go, notifier_test.go, parse_test.go, import_test.go
 │   ├── domain/              errors.go, reminder.go, task.go
 │   ├── logger/              slogger.go
 │   ├── repository/postgres/
@@ -132,7 +140,7 @@ deadline-bot/
 │   │     *_test.go, repo_integration_test.go (tag: integration)
 │   ├── scheduler/           scheduler.go, scheduler_test.go, iface_check_test.go
 │   └── service/             planner.go, tasks.go, planner_test.go, tasks_test.go
-├── migrations/              00001_init.sql, 00002_claim.sql, embed.go
+├── migrations/              00001_init.sql, 00002_claim.sql, 00003_task_file.sql, embed.go
 ├── Dockerfile, .dockerignore, docker-compose.yaml
 ├── Makefile, go.mod, go.sum, .env.example, .gitignore
 └── README.md
@@ -152,7 +160,7 @@ Import `_ "time/tzdata"` in `main` so `LoadLocation` works in minimal Docker ima
 
 ## 8. Database schema
 
-`tasks`: `id BIGSERIAL PK, subject TEXT NOT NULL, title TEXT NOT NULL, details TEXT NOT NULL DEFAULT '', deadline TIMESTAMPTZ NOT NULL, done_at TIMESTAMPTZ NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()`. No index on `deadline` (personal scale).
+`tasks`: `id BIGSERIAL PK, subject TEXT NOT NULL, title TEXT NOT NULL, details TEXT NOT NULL DEFAULT '', file_id TEXT NOT NULL DEFAULT '' (00003; Telegram file_id, '' = no file), deadline TIMESTAMPTZ NOT NULL, done_at TIMESTAMPTZ NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()`. No index on `deadline` (personal scale).
 
 `reminders`: `id BIGSERIAL PK, task_id BIGINT NOT NULL → tasks ON DELETE CASCADE, kind TEXT NOT NULL ('d2','d1','dday','nag','snooze'; set only from `domain.Kind*` constants, no CHECK constraint), remind_at TIMESTAMPTZ NOT NULL, claimed_at TIMESTAMPTZ NULL (00002), sent_at TIMESTAMPTZ NULL`. Partial index `reminders_due_idx (remind_at) WHERE sent_at IS NULL`.
 
@@ -251,6 +259,7 @@ DoD: `/add`, `/list`, `/done` work locally; a test reminder with a deadline a fe
 ## 11. Roadmap
 
 - **Stage 2 — NetAcad:** `/netgoal X Y` (X topics over Y days, per_day = X/Y), daily check-in with buttons ("Всё прошёл" / number), debt carried over, firm nagging tone. Manual numbers first; screenshot input later.
+- **Next import step — Teams e-mail:** the owner forwards Teams notification e-mails from the university Outlook to Gmail; the bot reads Gmail over IMAP (app password), runs the same parser and sends the same draft. Dedup by `Message-ID`. Not started.
 - **Stage 3 — parser microservice:** separate service on hosting, worker pool over files; AI via API only if needed (free-tier limits — check current terms); regex/manual dates first.
 - **Stage 4 — deploy:** one Docker image + env. A candidate free setup discussed: always-free small VM + free serverless Postgres. Free-tier terms change: verify before relying on them. Long-polling bots need an always-on process; sleeping free tiers break them.
 
@@ -258,7 +267,7 @@ DoD: `/add`, `/list`, `/done` work locally; a test reminder with a deadline a fe
 
 ## 12. Testing strategy
 
-- Unit tests (stdlib + small fakes): config, planner, service, parser, scheduler.
+- Unit tests (stdlib + small fakes): config, planner, service, parsers (incl. `ParseImport` on real Teams texts), import/draft flow, scheduler.
 - `pgxmock/v5` tests only for cheap repo concerns: **error mapping** (`errors.Is(err, domain.ErrNotFound)`), behavior on DB errors (error wrapped and NOT `ErrNotFound`), FK violation (`&pgconn.PgError{Code: "23503"}`).
 - **Real Postgres** (tag `integration`, `TEST_DATABASE_URL`) for anything where SQL behavior matters, especially `ClaimDue` (second claim must not return the same reminder).
   `go test -tags integration ./internal/repository/postgres`
@@ -279,6 +288,8 @@ DoD: `/add`, `/list`, `/done` work locally; a test reminder with a deadline a fe
 8. ~~`scheduler.go` stub~~ — implemented (step 10).
 9. ~~`import _ "time/tzdata"` in `main`~~ — done.
 10. /snooze on an already-done task replies "Напомню…" but the reminder never fires (ClaimDue skips done tasks). Minor UX, not fixed.
+11. Import drafts are lost on restart (in memory by design). An expired draft answers «черновик устарел», but its buttons stay on the message.
+12. `details` is stored by the import but not shown anywhere yet (reminders, `/list`).
 
 ---
 

@@ -8,16 +8,18 @@ A personal Telegram bot in Go that tracks university deadlines for a single owne
 
 ## Why
 
-- The university uses MS Teams Assignments, and a student gets no API access to it. Deadlines are therefore entered by hand with one `/add` line.
+- The university uses MS Teams Assignments, and a student gets no API access to it. Instead, you copy the assignment text from Teams and paste it into the chat (optionally with the PDF), or type one `/add` line.
 - Reminders come at a fixed time (12:00 Almaty) and get louder on the deadline day, until you press "Сдал" ("Submitted").
 - It is also a portfolio project focused on clean layering, testable concurrency and honest docs.
 
 ## Features
 
 - Add, list, complete and snooze tasks from Telegram (owner only; every other chat is ignored and logged).
+- Import an assignment by pasting its text from MS Teams, with a draft to confirm first. The assignment PDF can be attached and is resent from the reminder with one button (see [Import from Teams](#import-from-teams)).
 - Automatic reminder schedule, described next.
 - Inline buttons on every reminder: `Сдал ✅` (done), `Отложить на 3ч` (snooze 3h), `До завтра` (until next 12:00).
 - One JSON log line per command or button, with duration and result. Task text is never logged.
+- No paid APIs: the import parser is plain Go (regexp), and files stay in Telegram.
 - `GET /healthz` and a Docker HEALTHCHECK.
 
 ### Reminder rules
@@ -53,6 +55,7 @@ Deadline 09:00 example: dday at 08:00 and one nag at 10:00.
 - `/list`: tasks not done yet, nearest deadline first, with the time left or `просрочено` (overdue)
 - `/done <id>`: mark done (`/done 7`)
 - `/snooze <id> <duration>`: extra reminder later
+- Any message without a leading `/`: import an assignment from Teams text (next section)
 
 ```
 /add БИС | Lab 5 | 23.11 23:59
@@ -95,6 +98,59 @@ A reminder message (the dday one) looks like this, with three buttons under it:
 ```
 
 After a button press the message gets a status line (`✅ Сдано`, or `⏰ Отложено до 23.11 (пн) 15:00`) and the buttons disappear.
+
+## Import from Teams
+
+Copy the assignment from MS Teams, write the subject as the first line and send it to the bot:
+
+```
+фбис
+Reading Exercise: Business Intelligence
+Срок заканчивается 10 ноября 2026 г., 23:59
+•
+Допускается несколько отправок
+Инструкции
+Read case on pp.512-514 and answer questions on p.514
+```
+
+The bot answers with a draft. Nothing is saved until you press a button:
+
+```
+Нашёл задание:
+ФБИС — Reading Exercise: Business Intelligence
+Дедлайн: 10.11 (вт) 23:59
+
+Read case on pp.512-514 and answer questions on p.514
+
+[ Добавить ✅ ] [ Отмена ]
+```
+
+Glosses: "Found an assignment ... Deadline ...", buttons "Add" and "Cancel".
+
+How the text is read:
+
+- Line with the deadline: `Срок заканчивается 10 ноября 2026 г., 23:59` ("due on ..."). Also accepted: `Срок сдачи: 10 ноября, 18:00` and a date without a year or time. Missing year means the current year, missing time means 23:59.
+- The line just above it is the title; everything above the title is the subject. One-word subjects up to 8 letters are upper-cased (`фбис` → `ФБИС`), so one subject does not end up under two names.
+- Text after the deadline goes to `details`, without Teams service lines (`•`, `Допускается несколько отправок`, `Инструкции`).
+
+Validation (the bot refuses with a hint instead of guessing):
+
+- No deadline line, no subject or no title.
+- A date that has passed, is more than a year ahead, or does not exist (`31 ноября`, `25:00`).
+- Subject over 50 characters (usually the subject line was forgotten), title over 200; details are cut at 1000.
+- If an unfinished task has the same title (and the same subject or deadline), the draft shows `⚠️ Похоже, это уже есть: #7 …` ("looks like it already exists").
+
+Drafts:
+
+- Kept in memory for 24 hours. Each draft can be used once, so a second press does not create a duplicate. After a restart, send the text again.
+- Plain text that is not an assignment (for example `привет`) gets the format hint. Unknown `/commands` still get the help text.
+
+### Attaching the PDF
+
+- Send the PDF with the Teams text as its caption. Telegram limits captions to 1024 characters; for longer text use the next option.
+- Or send the text first and then the PDF without a caption. The file is attached to the latest draft that has not been confirmed yet, and its old buttons keep working.
+- Only Telegram's `file_id` is stored (`tasks.file_id`); the file itself stays in Telegram.
+- Reminders of a task with a file get one more button, `📎 Задание` ("assignment"). It sends the PDF and leaves the reminder buttons in place. `/list` marks such tasks with 📎.
 
 Error replies: `/done` (or the `Сдал ✅` button) on an unknown or already done task, and `/snooze` on an unknown id, give `Задачи #7 нет или она уже сдана.` (task #7 doesn't exist or is already done). Internal errors give a generic message; details go only to the logs.
 
@@ -216,13 +272,14 @@ docker stop deadline-bot-testdb
 - What is covered:
   - the planner: table-driven edge cases such as noon deadlines, month boundaries and late additions;
   - the service, with a fake repo and a fake clock;
-  - parsers;
+  - parsers, including the Teams import on real assignment texts;
+  - the import flow: draft, confirm, cancel, expiry, double press, duplicate warning, PDF in a caption or attached later, the `📎` button;
   - bot commands, buttons and the stranger filter, against a fake Telegram API;
   - notifier texts and buttons (including a cancelled rate-limit wait that sends nothing);
   - the scheduler: send then mark, a failed send is never marked, a claim error does not stop the loop, MarkSent survives shutdown;
   - the health handler;
   - repository error mapping with pgxmock;
-  - `ClaimDue` never returning the same reminder twice (integration).
+  - `ClaimDue` never returning the same reminder twice, and `file_id` surviving a round trip (integration).
 
 ## Project layout
 
@@ -237,7 +294,7 @@ docker stop deadline-bot-testdb
 │   ├── scheduler/              # ticker + worker pool, at-least-once delivery
 │   ├── repository/postgres/    # pgx repository, ClaimDue lease, goose migrator
 │   └── delivery/
-│       ├── telegram/           # commands, buttons, parsers, rate-limited notifier
+│       ├── telegram/           # commands, buttons, parsers, Teams import + drafts, rate-limited notifier
 │       └── health/             # /healthz server and -healthcheck client
 ├── migrations/                 # goose SQL files + embed.go
 ├── .github/workflows/ci.yml
@@ -250,7 +307,10 @@ docker stop deadline-bot-testdb
 
 One line each; the full log is in [AGENTS/AGENTS.md](AGENTS/AGENTS.md) (section 5).
 
-- Manual `/add` instead of an integration: there is no access to the MS Teams Assignments API.
+- Paste-to-import (plus manual `/add`) instead of an integration: there is no access to the MS Teams Assignments API, and the bot runs on a server, so it cannot read anything from the owner's devices.
+- The import parser is regexp-based, not an LLM: no API costs, and its results are deterministic and testable on real Teams texts. A draft with confirmation buttons catches what the parser gets wrong.
+- Import drafts live in memory, not in the DB: there is one owner, and resending the text after a restart is cheap.
+- Attachments are stored as Telegram `file_id` only: no file storage on the server.
 - All reminders (including nags) are planned when the task is created. The scheduler stays simple (claim, send, mark) and holds no business rules.
 - At-least-once delivery with a DB lease: a duplicate reminder is cheaper than a missed deadline, and a crashed worker cannot lose one.
 - `done_at TIMESTAMPTZ NULL` instead of a status enum: it records both the fact and the time, and there are only two states.
@@ -268,7 +328,10 @@ One line each; the full log is in [AGENTS/AGENTS.md](AGENTS/AGENTS.md) (section 
 - Single user by design.
 - The timezone and the 12:00 reminder time are fixed in code.
 - There is no edit or delete command; a wrong task can only be marked done.
-- `/add` sets subject, title and deadline only (the `details` column is unused).
+- `/add` sets subject, title and deadline only; `details` is filled only by the Teams import and is not shown in reminders yet.
+- The import understands the Russian Teams interface only (`Срок заканчивается …`).
+- Import drafts are lost on restart.
+- A PDF is not parsed; the deadline always comes from the pasted text.
 - Duplicates are possible in rare failure cases (at-least-once).
 - `/snooze` on an already done task is accepted, but the reminder never fires.
 - Not deployed yet; it runs locally or in Docker.
@@ -276,6 +339,7 @@ One line each; the full log is in [AGENTS/AGENTS.md](AGENTS/AGENTS.md) (section 
 ## Roadmap
 
 - **NetAcad tracker** (next): `/netgoal X Y` (X topics in Y days), a daily check-in with buttons, and unfinished topics carried over as debt. Debt is computed, not stored. The `netacad_goals` table already exists; there is no code yet.
-- **Parsing microservice**: a separate Go service that turns PDFs and screenshots of assignments into text, so tasks need less typing.
+- **Teams e-mail import**: read the Teams notification e-mails over IMAP (forwarded to Gmail) and send the same drafts automatically.
+- **Parsing microservice**: a separate Go service that turns PDFs and screenshots of assignments into text.
 - **Deploy**: the same image plus env on an always-on free host. Long polling needs a process that does not sleep.
 - Out of scope: multi-user support, a web UI, a Teams API integration.
