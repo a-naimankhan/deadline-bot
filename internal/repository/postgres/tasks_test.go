@@ -29,6 +29,7 @@ func TestCreateTask(t *testing.T) {
 			Subject:  "TEST",
 			Title:    "Test Task",
 			Details:  "Details",
+			FileID:   "BQACAgIAAxk",
 			Deadline: deadline,
 		}
 		reminders := []domain.Reminder{
@@ -37,7 +38,7 @@ func TestCreateTask(t *testing.T) {
 
 		mock.ExpectBegin()
 		mock.ExpectQuery(`INSERT INTO tasks`).
-			WithArgs(task.Subject, task.Title, task.Details, deadline).
+			WithArgs(task.Subject, task.Title, task.Details, task.FileID, deadline).
 			WillReturnRows(pgxmock.NewRows([]string{"id", "created_at"}).
 				AddRow(int64(1), time.Now().UTC()))
 
@@ -95,7 +96,7 @@ func TestCreateTask(t *testing.T) {
 
 		mock.ExpectBegin()
 		mock.ExpectQuery(`INSERT INTO tasks`).
-			WithArgs(task.Subject, task.Title, task.Details, task.Deadline).
+			WithArgs(task.Subject, task.Title, task.Details, task.FileID, task.Deadline).
 			WillReturnError(errors.New("boom"))
 		mock.ExpectRollback()
 
@@ -125,7 +126,7 @@ func TestCreateTask(t *testing.T) {
 
 		mock.ExpectBegin()
 		mock.ExpectQuery(`INSERT INTO tasks`).
-			WithArgs(task.Subject, task.Title, task.Details, task.Deadline).
+			WithArgs(task.Subject, task.Title, task.Details, task.FileID, task.Deadline).
 			WillReturnRows(pgxmock.NewRows([]string{"id", "created_at"}).AddRow(int64(1), time.Now().UTC()))
 		mock.ExpectExec(`INSERT INTO reminders`).
 			WithArgs(int64(1), string(reminders[0].Kind), reminders[0].RemindAt).
@@ -157,7 +158,7 @@ func TestCreateTask(t *testing.T) {
 
 		mock.ExpectBegin()
 		mock.ExpectQuery(`INSERT INTO tasks`).
-			WithArgs(task.Subject, task.Title, task.Details, task.Deadline).
+			WithArgs(task.Subject, task.Title, task.Details, task.FileID, task.Deadline).
 			WillReturnRows(pgxmock.NewRows([]string{"id", "created_at"}).AddRow(int64(1), time.Now().UTC()))
 		mock.ExpectCommit().WillReturnError(errors.New("boom"))
 
@@ -188,9 +189,9 @@ func TestListActive(t *testing.T) {
 		repo := New(mock)
 
 		now := time.Now().UTC()
-		rows := pgxmock.NewRows([]string{"id", "subject", "title", "details", "deadline", "done_at", "created_at"}).
-			AddRow(int64(1), "TEST", "Task1", "Details1", now.Add(24*time.Hour), nil, now).
-			AddRow(int64(2), "TEST", "Task2", "Details2", now.Add(48*time.Hour), nil, now)
+		rows := pgxmock.NewRows([]string{"id", "subject", "title", "details", "file_id", "deadline", "done_at", "created_at"}).
+			AddRow(int64(1), "TEST", "Task1", "Details1", "", now.Add(24*time.Hour), nil, now).
+			AddRow(int64(2), "TEST", "Task2", "Details2", "", now.Add(48*time.Hour), nil, now)
 
 		mock.ExpectQuery(`SELECT ` + taskColumns + ` FROM tasks WHERE done_at IS NULL`).
 			WillReturnRows(rows)
@@ -246,7 +247,7 @@ func TestListActive(t *testing.T) {
 		defer mock.Close()
 
 		repo := New(mock)
-		rows := pgxmock.NewRows([]string{"id", "subject", "title", "details", "deadline", "done_at", "created_at"})
+		rows := pgxmock.NewRows([]string{"id", "subject", "title", "details", "file_id", "deadline", "done_at", "created_at"})
 
 		mock.ExpectQuery(`SELECT ` + taskColumns + ` FROM tasks WHERE done_at IS NULL`).
 			WillReturnRows(rows)
@@ -280,8 +281,8 @@ func TestGetTask(t *testing.T) {
 
 		mock.ExpectQuery(`SELECT ` + taskColumns + ` FROM tasks WHERE id = \$1`).
 			WithArgs(int64(1)).
-			WillReturnRows(pgxmock.NewRows([]string{"id", "subject", "title", "details", "deadline", "done_at", "created_at"}).
-				AddRow(int64(1), "TEST", "Task1", "Details1", now.Add(24*time.Hour), nil, now))
+			WillReturnRows(pgxmock.NewRows([]string{"id", "subject", "title", "details", "file_id", "deadline", "done_at", "created_at"}).
+				AddRow(int64(1), "TEST", "Task1", "Details1", "", now.Add(24*time.Hour), nil, now))
 
 		task, err := repo.GetTask(ctx, 1)
 		if err != nil {

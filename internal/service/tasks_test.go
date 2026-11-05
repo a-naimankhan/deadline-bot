@@ -32,6 +32,18 @@ func (f *fakeRepo) ListActive(context.Context) ([]domain.Task, error) {
 	return f.created, f.err
 }
 
+func (f *fakeRepo) GetTask(_ context.Context, id int64) (domain.Task, error) {
+	if f.err != nil {
+		return domain.Task{}, f.err
+	}
+	for _, t := range f.created {
+		if t.ID == id {
+			return t, nil
+		}
+	}
+	return domain.Task{}, domain.ErrNotFound
+}
+
 func (f *fakeRepo) MarkDone(_ context.Context, id int64, at time.Time) error {
 	if f.err != nil {
 		return f.err
@@ -65,13 +77,14 @@ func TestAddTask(t *testing.T) {
 		task, err := svc.AddTask(ctx, AddTaskInput{
 			Subject:  "  БИС ",
 			Title:    "Lab 5",
+			FileID:   "file-1",
 			Deadline: time.Date(2026, time.October, 23, 23, 59, 0, 0, loc),
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if task.ID != 1 || task.Subject != "БИС" {
-			t.Errorf("task = %+v, want ID 1 and trimmed subject", task)
+		if task.ID != 1 || task.Subject != "БИС" || task.FileID != "file-1" {
+			t.Errorf("task = %+v, want ID 1, trimmed subject and file_id", task)
 		}
 		if task.Deadline.Location() != time.UTC {
 			t.Errorf("deadline location = %s, want UTC", task.Deadline.Location())
@@ -137,6 +150,20 @@ func TestListActive(t *testing.T) {
 			t.Errorf("err = %v, want wrapped boom", err)
 		}
 	})
+}
+
+func TestGetTask(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, time.October, 20, 10, 0, 0, 0, almaty(t))
+	repo := &fakeRepo{created: []domain.Task{{ID: 1, Title: "Lab"}}}
+	svc := newTestService(t, repo, now)
+
+	if got, err := svc.GetTask(ctx, 1); err != nil || got.Title != "Lab" {
+		t.Errorf("GetTask(1) = %+v, %v", got, err)
+	}
+	if _, err := svc.GetTask(ctx, 2); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("GetTask(2) err = %v, want ErrNotFound", err)
+	}
 }
 
 func TestDone(t *testing.T) {

@@ -54,9 +54,24 @@ func TestNotifierSend(t *testing.T) {
 		}
 	})
 
+	t.Run("task with file gets attachment button", func(t *testing.T) {
+		api := &fakeSender{}
+		n := newNotifier(api, ownerID, loc, func() time.Time { return now })
+		r := dueReminder(domain.KindDDay, deadline)
+		r.Task.FileID = "file-1"
+		if err := n.Send(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		kb := api.sent[0].ReplyMarkup.(*models.InlineKeyboardMarkup)
+		last := kb.InlineKeyboard[len(kb.InlineKeyboard)-1]
+		if len(last) != 1 || last[0].CallbackData != "file:7" {
+			t.Errorf("last row = %+v, want file:7 button", last)
+		}
+	})
+
 	t.Run("buttons round-trip through callback handler", func(t *testing.T) {
 		// Каждая кнопка напоминания должна распознаваться обработчиком.
-		for _, row := range reminderKeyboard(7).InlineKeyboard {
+		for _, row := range reminderKeyboard(7, true).InlineKeyboard {
 			for _, btn := range row {
 				if _, id, ok := parseCallback(btn.CallbackData); !ok || id != 7 {
 					t.Errorf("button %q not recognised (id=%d ok=%v)", btn.CallbackData, id, ok)

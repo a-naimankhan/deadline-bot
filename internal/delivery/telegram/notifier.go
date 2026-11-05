@@ -48,7 +48,7 @@ func (n *Notifier) Send(ctx context.Context, r domain.DueReminder) error {
 	_, err := n.api.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      n.chatID,
 		Text:        reminderText(r, n.clock(), n.loc),
-		ReplyMarkup: reminderKeyboard(r.TaskID),
+		ReplyMarkup: reminderKeyboard(r.TaskID, r.Task.FileID != ""),
 	})
 	if err != nil {
 		return fmt.Errorf("send reminder %d: %w", r.ID, err)
@@ -79,15 +79,20 @@ func reminderText(r domain.DueReminder, now time.Time, loc *time.Location) strin
 	}
 }
 
-func reminderKeyboard(taskID int64) *models.InlineKeyboardMarkup {
+// reminderKeyboard: «Сдал», два «Отложить» и, если к задаче прикреплён файл, «📎 Задание».
+func reminderKeyboard(taskID int64, hasFile bool) *models.InlineKeyboardMarkup {
 	id := strconv.FormatInt(taskID, 10)
-	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+	rows := [][]models.InlineKeyboardButton{
 		{{Text: "Сдал ✅", CallbackData: cbDone + ":" + id}},
 		{
 			{Text: "Отложить на 3ч", CallbackData: cbSnooze + ":" + id + ":" + cbSnooze3h},
 			{Text: "До завтра", CallbackData: cbSnooze + ":" + id + ":" + cbSnoozeTomorrow},
 		},
-	}}
+	}
+	if hasFile {
+		rows = append(rows, []models.InlineKeyboardButton{{Text: "📎 Задание", CallbackData: cbFile + ":" + id}})
+	}
+	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 var weekdays = [...]string{"вс", "пн", "вт", "ср", "чт", "пт", "сб"}
