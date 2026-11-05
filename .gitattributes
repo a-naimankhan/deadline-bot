@@ -1,0 +1,2 @@
+# LF everywhere, regardless of core.autocrlf on Windows checkouts.
+* text=auto eol=lf
