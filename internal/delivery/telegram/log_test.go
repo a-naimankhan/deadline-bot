@@ -62,11 +62,24 @@ func TestLogging(t *testing.T) {
 			want:   []string{`"level":"ERROR"`, `"result":"error"`, "db is down"},
 		},
 		{
-			name:    "free text is logged as unknown",
+			name:    "free text is logged as import without the text",
 			svc:     &fakeService{},
 			update:  message(ownerID, "привет, как дела"),
-			want:    []string{`"cmd":"unknown"`},
+			want:    []string{`"cmd":"import"`, `"result":"invalid_input"`},
 			notWant: []string{"привет"},
+		},
+		{
+			name:    "import draft logs draft_id, not task_id",
+			svc:     &fakeService{},
+			update:  message(ownerID, teamsFBIS),
+			want:    []string{`"cmd":"import"`, `"draft_id":1`},
+			notWant: []string{"task_id", "Reading"},
+		},
+		{
+			name:   "unknown slash command",
+			svc:    &fakeService{},
+			update: message(ownerID, "/foo"),
+			want:   []string{`"cmd":"unknown"`},
 		},
 		{
 			name:   "callback",

@@ -234,7 +234,7 @@ func TestCommands(t *testing.T) {
 
 	t.Run("unknown command shows help", func(t *testing.T) {
 		b, api := newTestBot(t, &fakeService{}, now)
-		b.handle(ctx, message(ownerID, "привет"))
+		b.handle(ctx, message(ownerID, "/foo"))
 		if got := lastText(t, api); !strings.Contains(got, "/add") {
 			t.Errorf("reply = %q", got)
 		}
